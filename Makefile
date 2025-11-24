@@ -14,10 +14,15 @@ LDFLAGS:=${QISKIT_LDFLAGS} -Wl,-z,now,-z,relro,-z,noexecstack,--gc-sections
 
 all: $(patsubst %.cpp, %.so, $(wildcard *.cpp))
 
-.PHONY: all run
+.PHONY: all run clean
 
+r: run
 run: test.py all
 	VIRTUAL_ENV=~/.virtualenvs/qiskit uv run $<
+
+cl: clean
+clean:
+	fd -e so -I -X rm; rm compile_commands.json
 
 %.so: %.cpp
 	${CXX} $< ${CXXFLAGS} ${PYTHON_PKG_CONFIG} ${OPTFLAGS} ${LDFLAGS} -o $@
