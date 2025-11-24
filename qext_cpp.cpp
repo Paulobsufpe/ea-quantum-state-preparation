@@ -185,7 +185,7 @@ static PyMethodDef ExtMethods[] {
 /// Define the module, which here is called ``cextension``.
 static struct PyModuleDef cppextension {
     PyModuleDef_HEAD_INIT,
-    "qext",     // module name
+    "qext_cpp",     // module name
     NULL,       // docs
     -1,         // keep the module state in global variables
     ExtMethods,
@@ -193,4 +193,4 @@ static struct PyModuleDef cppextension {
     0, 0, 0, 0
 };
  
-PyMODINIT_FUNC PyInit_qext(void) { return PyModule_Create(&cppextension); }
+PyMODINIT_FUNC PyInit_qext_cpp(void) { return PyModule_Create(&cppextension); }
