@@ -17,7 +17,7 @@ all: $(patsubst %.cpp, %.so, $(wildcard *.cpp))
 .PHONY: all run clean
 
 r: run
-run: test.py all
+run: test_cpp.py all
 	VIRTUAL_ENV=~/.virtualenvs/qiskit uv run $<
 
 cl: clean
