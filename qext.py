@@ -29,30 +29,44 @@ class GateType(Enum):
 class Gate:
     """Represents a quantum gate in the circuit"""
     gate_type: GateType
-    qubits: List[int]           # Target qubit(s)
-    control_qubits: List[int] = None  # For controlled gates
+    qubits: List[int]           # All qubits involved in the gate
     angle: float = 0.0          # For parameterized gates (RZ)
     
     def __post_init__(self):
-        if self.control_qubits is None:
-            self.control_qubits = []
+        # Ensure qubits are unique and sorted
+        self.qubits = sorted(set(self.qubits))
+        
+    @property
+    def is_single_qubit(self) -> bool:
+        return len(self.qubits) == 1
+        
+    @property
+    def is_two_qubit(self) -> bool:
+        return len(self.qubits) == 2
 
 class CircuitIndividual:
     """Represents an individual quantum circuit in the population"""
     
-    def __init__(self, num_qubits: int, depth: int, gates: List[List[Gate]] = None):
+    def __init__(self, num_qubits: int, depth: int, layers: List[List[Gate]] = None):
         self.num_qubits = num_qubits
         self.depth = depth
         
-        # 2D grid: gates[qubit][time_step]
-        if gates is None:
-            self.gates = [[Gate(GateType.ID, [q]) for _ in range(depth)] for q in range(num_qubits)]
+        # Represent circuit as layers: each layer contains gates that can be applied in parallel
+        if layers is None:
+            self.layers = [[] for _ in range(depth)]
         else:
-            self.gates = gates
+            self.layers = layers
             
         self.fitness: float = -float('inf')
         self.fidelity: float = 0.0
         self.normalized_depth: float = 0.0
+        
+    def get_used_qubits(self, layer_idx: int) -> set:
+        """Get set of qubits already used in a layer"""
+        used_qubits = set()
+        for gate in self.layers[layer_idx]:
+            used_qubits.update(gate.qubits)
+        return used_qubits
         
     def to_qiskit_circuit(self) -> 'QuantumCircuit':
         """Convert to Qiskit QuantumCircuit"""
@@ -61,25 +75,27 @@ class CircuitIndividual:
             
         qc = QuantumCircuit(self.num_qubits)
         
-        for time_step in range(self.depth):
-            for qubit in range(self.num_qubits):
-                gate = self.gates[qubit][time_step]
-                
+        for layer in self.layers:
+            # Apply all gates in the layer
+            for gate in layer:
                 if gate.gate_type == GateType.ID:
                     continue  # Skip identity gates
                     
                 if gate.gate_type == GateType.X:
-                    qc.x(qubit)
+                    for qubit in gate.qubits:
+                        qc.x(qubit)
                 elif gate.gate_type == GateType.SX:
-                    qc.sx(qubit)
+                    for qubit in gate.qubits:
+                        qc.sx(qubit)
                 elif gate.gate_type == GateType.RZ:
-                    qc.rz(gate.angle, qubit)
+                    for qubit in gate.qubits:
+                        qc.rz(gate.angle, qubit)
                 elif gate.gate_type == GateType.H:
-                    qc.h(qubit)
-                elif gate.gate_type == GateType.CX:
-                    if len(gate.control_qubits) > 0:
-                        control = gate.control_qubits[0]
-                        qc.cx(control, qubit)
+                    for qubit in gate.qubits:
+                        qc.h(qubit)
+                elif gate.gate_type == GateType.CX and len(gate.qubits) == 2:
+                    # CX gate: first qubit is control, second is target
+                    qc.cx(gate.qubits[0], gate.qubits[1])
         
         return qc
     
@@ -102,8 +118,8 @@ class CircuitIndividual:
     def get_parameters(self) -> List[float]:
         """Get all parameterized gate angles"""
         parameters = []
-        for qubit_gates in self.gates:
-            for gate in qubit_gates:
+        for layer in self.layers:
+            for gate in layer:
                 if gate.gate_type == GateType.RZ:
                     parameters.append(gate.angle)
         return parameters
@@ -111,8 +127,8 @@ class CircuitIndividual:
     def set_parameters(self, parameters: List[float]):
         """Set parameterized gate angles"""
         param_idx = 0
-        for qubit_gates in self.gates:
-            for gate in qubit_gates:
+        for layer in self.layers:
+            for gate in layer:
                 if gate.gate_type == GateType.RZ:
                     if param_idx < len(parameters):
                         gate.angle = parameters[param_idx]
@@ -194,8 +210,6 @@ class QuantumEvolutionaryOptimizer:
         for _ in range(self.population_size):
             if from_target:
                 # Start with target circuit (for optimization)
-                # This would require cloning the target circuit
-                # For now, create random circuit
                 individual = self._create_random_circuit(initial_depth)
             else:
                 # Create from scratch
@@ -203,35 +217,50 @@ class QuantumEvolutionaryOptimizer:
                 
             self.population.append(individual)
     
+    def _get_available_qubits(self, used_qubits: set) -> List[int]:
+        """Get list of qubits not currently used in a layer"""
+        return [q for q in range(self.num_qubits) if q not in used_qubits]
+    
     def _create_random_circuit(self, depth: int) -> CircuitIndividual:
-        """Create a random quantum circuit"""
-        gates = []
+        """Create a random quantum circuit using layer-based representation"""
+        layers = []
         
-        for qubit in range(self.num_qubits):
-            qubit_gates = []
-            for time_step in range(depth):
+        for _ in range(depth):
+            layer = []
+            used_qubits = set()
+            available_qubits = set(range(self.num_qubits))
+            
+            # Try to add gates until no more qubits are available
+            while available_qubits:
                 gate_type = random.choice(self.gate_set)
                 
-                if gate_type == GateType.CX:
-                    # Find available control qubit
-                    available_qubits = [q for q in range(self.num_qubits) if q != qubit]
-                    if available_qubits:
-                        control = random.choice(available_qubits)
-                        gate = Gate(gate_type, [qubit], [control])
-                    else:
-                        # Fallback to single-qubit gate
-                        gate_type = random.choice([gt for gt in self.gate_set if gt != GateType.CX])
-                        gate = Gate(gate_type, [qubit])
-                elif gate_type == GateType.RZ:
-                    angle = random.uniform(0, 2 * np.pi)
-                    gate = Gate(gate_type, [qubit], angle=angle)
-                else:
-                    gate = Gate(gate_type, [qubit])
+                if gate_type == GateType.CX and len(available_qubits) >= 2:
+                    # Add CX gate - need two distinct qubits
+                    qubit_pair = random.sample(list(available_qubits), 2)
+                    gate = Gate(gate_type, qubit_pair)
+                    layer.append(gate)
+                    used_qubits.update(qubit_pair)
                     
-                qubit_gates.append(gate)
-            gates.append(qubit_gates)
+                elif gate_type != GateType.ID and available_qubits:
+                    # Add single-qubit gate
+                    qubit = random.choice(list(available_qubits))
+                    if gate_type == GateType.RZ:
+                        angle = random.uniform(0, 2 * np.pi)
+                        gate = Gate(gate_type, [qubit], angle=angle)
+                    else:
+                        gate = Gate(gate_type, [qubit])
+                    layer.append(gate)
+                    used_qubits.add(qubit)
+                else:
+                    # No more valid gates to add
+                    break
+                    
+                # Update available qubits
+                available_qubits = set(range(self.num_qubits)) - used_qubits
+                
+            layers.append(layer)
             
-        return CircuitIndividual(self.num_qubits, depth, gates)
+        return CircuitIndividual(self.num_qubits, depth, layers)
     
     def calculate_fitness(self, individual: CircuitIndividual) -> float:
         """Calculate fitness based on fidelity and circuit depth"""
@@ -308,7 +337,11 @@ class QuantumEvolutionaryOptimizer:
         """Perform crossover between two parents"""
         if random.random() > self.crossover_rate:
             # No crossover, return random parent
-            return random.choice([parent1, parent2])
+            return random.choice([parent1, parent2]).__class__(
+                parent1.num_qubits, 
+                parent1.depth, 
+                [layer.copy() for layer in parent1.layers]
+            )
             
         if method == CrossoverType.SINGLE_POINT:
             return self._single_point_crossover(parent1, parent2)
@@ -325,94 +358,85 @@ class QuantumEvolutionaryOptimizer:
         child_depth = random.choice([parent1.depth, parent2.depth])
         crossover_point = random.randint(1, child_depth - 1)
         
-        child_gates = []
-        for qubit in range(self.num_qubits):
-            qubit_gates = []
-            for time_step in range(child_depth):
-                if time_step < crossover_point:
-                    # Take from smaller parent or pad
-                    if time_step < parent1.depth:
-                        qubit_gates.append(parent1.gates[qubit][time_step])
-                    else:
-                        qubit_gates.append(parent2.gates[qubit][time_step])
+        child_layers = []
+        for time_step in range(child_depth):
+            if time_step < crossover_point:
+                # Take from parent1 if available, else from parent2
+                if time_step < len(parent1.layers):
+                    child_layers.append(parent1.layers[time_step].copy())
                 else:
-                    if time_step < parent2.depth:
-                        qubit_gates.append(parent2.gates[qubit][time_step])
-                    else:
-                        qubit_gates.append(Gate(GateType.ID, [qubit]))
-            child_gates.append(qubit_gates)
-            
-        return CircuitIndividual(self.num_qubits, child_depth, child_gates)
+                    child_layers.append(parent2.layers[time_step].copy())
+            else:
+                # Take from parent2 if available, else from parent1
+                if time_step < len(parent2.layers):
+                    child_layers.append(parent2.layers[time_step].copy())
+                else:
+                    child_layers.append(parent1.layers[time_step].copy())
+                    
+        return CircuitIndividual(parent1.num_qubits, child_depth, child_layers)
     
     def _uniform_crossover(self, parent1: CircuitIndividual, parent2: CircuitIndividual) -> CircuitIndividual:
-        """Uniform column crossover"""
+        """Uniform layer crossover"""
         child_depth = random.choice([parent1.depth, parent2.depth])
         
-        child_gates = []
-        for qubit in range(self.num_qubits):
-            qubit_gates = []
-            for time_step in range(child_depth):
-                if random.random() < 0.5 and time_step < parent1.depth:
-                    qubit_gates.append(parent1.gates[qubit][time_step])
-                elif time_step < parent2.depth:
-                    qubit_gates.append(parent2.gates[qubit][time_step])
-                else:
-                    qubit_gates.append(Gate(GateType.ID, [qubit]))
-            child_gates.append(qubit_gates)
-            
-        return CircuitIndividual(self.num_qubits, child_depth, child_gates)
+        child_layers = []
+        for time_step in range(child_depth):
+            if random.random() < 0.5 and time_step < len(parent1.layers):
+                child_layers.append(parent1.layers[time_step].copy())
+            elif time_step < len(parent2.layers):
+                child_layers.append(parent2.layers[time_step].copy())
+            else:
+                child_layers.append([])  # Empty layer
+                
+        return CircuitIndividual(parent1.num_qubits, child_depth, child_layers)
     
     def _multi_point_crossover(self, parent1: CircuitIndividual, parent2: CircuitIndividual) -> CircuitIndividual:
         """Multi-point crossover"""
         child_depth = random.choice([parent1.depth, parent2.depth])
-        num_points = random.randint(2, 5)
-        points = sorted([0, child_depth] + [random.randint(1, child_depth-1) for _ in range(num_points)])
+        num_points = random.randint(2, min(5, child_depth))
+        points = sorted([0, child_depth] + random.sample(range(1, child_depth), num_points-2))
         
-        child_gates = []
+        child_layers = []
         use_parent1 = True
         
-        for qubit in range(self.num_qubits):
-            qubit_gates = []
-            for i in range(len(points)-1):
-                start, end = points[i], points[i+1]
-                parent = parent1 if use_parent1 else parent2
-                
-                for time_step in range(start, end):
-                    if time_step < parent.depth:
-                        qubit_gates.append(parent.gates[qubit][time_step])
-                    else:
-                        qubit_gates.append(Gate(GateType.ID, [qubit]))
-                        
-                use_parent1 = not use_parent1
-            child_gates.append(qubit_gates)
+        for i in range(len(points)-1):
+            start, end = points[i], points[i+1]
+            parent = parent1 if use_parent1 else parent2
             
-        return CircuitIndividual(self.num_qubits, child_depth, child_gates)
+            for time_step in range(start, end):
+                if time_step < len(parent.layers):
+                    child_layers.append(parent.layers[time_step].copy())
+                else:
+                    child_layers.append([])
+                    
+            use_parent1 = not use_parent1
+            
+        return CircuitIndividual(parent1.num_qubits, child_depth, child_layers)
     
     def _blockwise_crossover(self, parent1: CircuitIndividual, parent2: CircuitIndividual) -> CircuitIndividual:
-        """Block-wise crossover (2D)"""
+        """Block-wise crossover (2D) - simplified for layer representation"""
         child_depth = random.choice([parent1.depth, parent2.depth])
-        row_point = random.randint(1, self.num_qubits - 1)
-        col_point = random.randint(1, child_depth - 1)
+        depth_split = random.randint(1, child_depth - 1)
+        qubit_split = random.randint(1, parent1.num_qubits - 1)
         
-        child_gates = []
-        for qubit in range(self.num_qubits):
-            qubit_gates = []
-            for time_step in range(child_depth):
-                if (qubit < row_point and time_step < col_point) or (qubit >= row_point and time_step >= col_point):
-                    # Take from parent1
-                    if time_step < parent1.depth:
-                        qubit_gates.append(parent1.gates[qubit][time_step])
-                    else:
-                        qubit_gates.append(Gate(GateType.ID, [qubit]))
-                else:
-                    # Take from parent2
-                    if time_step < parent2.depth:
-                        qubit_gates.append(parent2.gates[qubit][time_step])
-                    else:
-                        qubit_gates.append(Gate(GateType.ID, [qubit]))
-            child_gates.append(qubit_gates)
-            
-        return CircuitIndividual(self.num_qubits, child_depth, child_gates)
+        child_layers = []
+        for time_step in range(child_depth):
+            if time_step < depth_split:
+                # Take gates from parent1 that act on lower qubits
+                layer_gates = []
+                for gate in parent1.layers[time_step % len(parent1.layers)]:
+                    if all(q < qubit_split for q in gate.qubits):
+                        layer_gates.append(gate)
+                child_layers.append(layer_gates)
+            else:
+                # Take gates from parent2 that act on higher qubits
+                layer_gates = []
+                for gate in parent2.layers[time_step % len(parent2.layers)]:
+                    if all(q >= qubit_split for q in gate.qubits):
+                        layer_gates.append(gate)
+                child_layers.append(layer_gates)
+                
+        return CircuitIndividual(parent1.num_qubits, child_depth, child_layers)
     
     def mutate(self, individual: CircuitIndividual) -> CircuitIndividual:
         """Apply mutation to an individual"""
@@ -441,116 +465,145 @@ class QuantumEvolutionaryOptimizer:
             return self._mutate_parameters(individual)
     
     def _mutate_single_gate(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Mutate a single gate"""
-        qubit = random.randint(0, self.num_qubits - 1)
-        time_step = random.randint(0, individual.depth - 1)
+        """Mutate a single gate in a random layer"""
+        if not individual.layers:
+            return individual
+            
+        layer_idx = random.randint(0, len(individual.layers) - 1)
+        if not individual.layers[layer_idx]:
+            return individual
+            
+        gate_idx = random.randint(0, len(individual.layers[layer_idx]) - 1)
         
         new_gate_type = random.choice(self.gate_set)
-        if new_gate_type == GateType.RZ:
+        old_gate = individual.layers[layer_idx][gate_idx]
+        
+        if new_gate_type == GateType.CX and len(old_gate.qubits) >= 1:
+            # For CX gate, we need at least one qubit to find a partner
+            available_qubits = [q for q in range(self.num_qubits) if q not in old_gate.qubits]
+            if available_qubits:
+                new_qubits = [old_gate.qubits[0], random.choice(available_qubits)]
+                individual.layers[layer_idx][gate_idx] = Gate(new_gate_type, new_qubits)
+        elif new_gate_type == GateType.RZ:
             angle = random.uniform(0, 2 * np.pi)
-            individual.gates[qubit][time_step] = Gate(new_gate_type, [qubit], angle=angle)
+            individual.layers[layer_idx][gate_idx] = Gate(new_gate_type, old_gate.qubits[:1], angle=angle)
         else:
-            individual.gates[qubit][time_step] = Gate(new_gate_type, [qubit])
+            individual.layers[layer_idx][gate_idx] = Gate(new_gate_type, old_gate.qubits[:1])
             
         return individual
     
     def _mutate_gate_swap(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Swap two gates"""
-        qubit1, time_step1 = random.randint(0, self.num_qubits - 1), random.randint(0, individual.depth - 1)
-        qubit2, time_step2 = random.randint(0, self.num_qubits - 1), random.randint(0, individual.depth - 1)
-        
-        individual.gates[qubit1][time_step1], individual.gates[qubit2][time_step2] = \
-            individual.gates[qubit2][time_step2], individual.gates[qubit1][time_step1]
+        """Swap two gates between different layers"""
+        if len(individual.layers) < 2:
+            return individual
             
+        layer1, layer2 = random.sample(range(len(individual.layers)), 2)
+        if individual.layers[layer1] and individual.layers[layer2]:
+            gate1_idx = random.randint(0, len(individual.layers[layer1]) - 1)
+            gate2_idx = random.randint(0, len(individual.layers[layer2]) - 1)
+            
+            individual.layers[layer1][gate1_idx], individual.layers[layer2][gate2_idx] = \
+                individual.layers[layer2][gate2_idx], individual.layers[layer1][gate1_idx]
+                
         return individual
     
     def _mutate_column_swap(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Swap two columns"""
-        col1, col2 = random.sample(range(individual.depth), 2)
-        
-        for qubit in range(self.num_qubits):
-            individual.gates[qubit][col1], individual.gates[qubit][col2] = \
-                individual.gates[qubit][col2], individual.gates[qubit][col1]
-                
+        """Swap two layers"""
+        if len(individual.layers) >= 2:
+            idx1, idx2 = random.sample(range(len(individual.layers)), 2)
+            individual.layers[idx1], individual.layers[idx2] = individual.layers[idx2], individual.layers[idx1]
         return individual
     
     def _mutate_ctrl_target_swap(self, individual: CircuitIndividual) -> CircuitIndividual:
         """Swap control and target of CX gates"""
-        for qubit in range(self.num_qubits):
-            for time_step in range(individual.depth):
-                gate = individual.gates[qubit][time_step]
-                if gate.gate_type == GateType.CX and gate.control_qubits:
-                    # Swap control and target
-                    gate.control_qubits, gate.qubits = gate.qubits, gate.control_qubits
-                    
+        for layer in individual.layers:
+            for gate in layer:
+                if gate.gate_type == GateType.CX and len(gate.qubits) == 2:
+                    # Swap the two qubits
+                    gate.qubits = [gate.qubits[1], gate.qubits[0]]
         return individual
     
     def _mutate_add_random_column(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Add a random column"""
-        new_depth = individual.depth + 1
-        new_gates = []
+        """Add a random layer"""
+        new_layer = []
+        used_qubits = set()
+        available_qubits = set(range(self.num_qubits))
         
-        for qubit in range(self.num_qubits):
-            qubit_gates = individual.gates[qubit].copy()
-            # Add random gate at the end
+        while available_qubits:
             gate_type = random.choice(self.gate_set)
-            if gate_type == GateType.RZ:
-                angle = random.uniform(0, 2 * np.pi)
-                qubit_gates.append(Gate(gate_type, [qubit], angle=angle))
-            else:
-                qubit_gates.append(Gate(gate_type, [qubit]))
-            new_gates.append(qubit_gates)
             
-        return CircuitIndividual(self.num_qubits, new_depth, new_gates)
+            if gate_type == GateType.CX and len(available_qubits) >= 2:
+                qubit_pair = random.sample(list(available_qubits), 2)
+                new_layer.append(Gate(gate_type, qubit_pair))
+                used_qubits.update(qubit_pair)
+            elif gate_type != GateType.ID and available_qubits:
+                qubit = random.choice(list(available_qubits))
+                if gate_type == GateType.RZ:
+                    angle = random.uniform(0, 2 * np.pi)
+                    new_layer.append(Gate(gate_type, [qubit], angle=angle))
+                else:
+                    new_layer.append(Gate(gate_type, [qubit]))
+                used_qubits.add(qubit)
+            else:
+                break
+                
+            available_qubits = set(range(self.num_qubits)) - used_qubits
+            
+        individual.layers.append(new_layer)
+        individual.depth += 1
+        return individual
     
     def _mutate_delete_column(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Delete a random column (if depth > 1)"""
-        if individual.depth <= 1:
-            return individual
-            
-        col_to_delete = random.randint(0, individual.depth - 1)
-        new_depth = individual.depth - 1
-        new_gates = []
-        
-        for qubit in range(self.num_qubits):
-            qubit_gates = [gate for i, gate in enumerate(individual.gates[qubit]) if i != col_to_delete]
-            new_gates.append(qubit_gates)
-            
-        return CircuitIndividual(self.num_qubits, new_depth, new_gates)
+        """Delete a random layer (if depth > 1)"""
+        if individual.depth > 1:
+            idx_to_delete = random.randint(0, individual.depth - 1)
+            individual.layers.pop(idx_to_delete)
+            individual.depth -= 1
+        return individual
     
     def _mutate_add_cx_gate(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Add a CX gate at random position"""
-        qubit = random.randint(0, self.num_qubits - 1)
-        time_step = random.randint(0, individual.depth - 1)
-        
-        # Find available control qubit
-        available_qubits = [q for q in range(self.num_qubits) if q != qubit]
-        if available_qubits:
-            control = random.choice(available_qubits)
-            individual.gates[qubit][time_step] = Gate(GateType.CX, [qubit], [control])
-            
+        """Add a CX gate to a random layer"""
+        if individual.layers:
+            layer_idx = random.randint(0, individual.depth - 1)
+            current_layer = individual.layers[layer_idx]
+            used_qubits = set()
+            for gate in current_layer:
+                used_qubits.update(gate.qubits)
+                
+            available_qubits = [q for q in range(self.num_qubits) if q not in used_qubits]
+            if len(available_qubits) >= 2:
+                qubit_pair = random.sample(available_qubits, 2)
+                current_layer.append(Gate(GateType.CX, qubit_pair))
+                
         return individual
     
     def _mutate_add_single_gate(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Add a single-qubit gate at random position"""
-        qubit = random.randint(0, self.num_qubits - 1)
-        time_step = random.randint(0, individual.depth - 1)
-        
-        single_qubit_gates = [gt for gt in self.gate_set if gt != GateType.CX]
-        if single_qubit_gates:
-            gate_type = random.choice(single_qubit_gates)
-            if gate_type == GateType.RZ:
-                angle = random.uniform(0, 2 * np.pi)
-                individual.gates[qubit][time_step] = Gate(gate_type, [qubit], angle=angle)
-            else:
-                individual.gates[qubit][time_step] = Gate(gate_type, [qubit])
+        """Add a single-qubit gate to a random layer"""
+        if individual.layers:
+            layer_idx = random.randint(0, individual.depth - 1)
+            current_layer = individual.layers[layer_idx]
+            used_qubits = set()
+            for gate in current_layer:
+                used_qubits.update(gate.qubits)
                 
+            available_qubits = [q for q in range(self.num_qubits) if q not in used_qubits]
+            if available_qubits:
+                qubit = random.choice(available_qubits)
+                single_qubit_gates = [gt for gt in self.gate_set if gt != GateType.CX]
+                if single_qubit_gates:
+                    gate_type = random.choice(single_qubit_gates)
+                    if gate_type == GateType.RZ:
+                        angle = random.uniform(0, 2 * np.pi)
+                        current_layer.append(Gate(gate_type, [qubit], angle=angle))
+                    else:
+                        current_layer.append(Gate(gate_type, [qubit]))
+                        
         return individual
     
     def _mutate_parameters(self, individual: CircuitIndividual) -> CircuitIndividual:
         """Mutate parameters of parameterized gates"""
-        for qubit_gates in individual.gates:
-            for gate in qubit_gates:
+        for layer in individual.layers:
+            for gate in layer:
                 if gate.gate_type == GateType.RZ:
                     # Small perturbation
                     gate.angle += random.uniform(-0.1, 0.1)
@@ -581,25 +634,15 @@ class QuantumEvolutionaryOptimizer:
         return individual
     
     def optimize_circuit_structure(self, individual: CircuitIndividual) -> CircuitIndividual:
-        """Heuristic circuit optimization (remove identities, combine gates)"""
-        # Remove identity gates from the end of each qubit's gates
-        optimized_gates = []
-        max_depth = 0
+        """Heuristic circuit optimization (remove empty layers, combine gates)"""
+        # Remove empty layers
+        non_empty_layers = [layer for layer in individual.layers if layer]
         
-        for qubit in range(self.num_qubits):
-            qubit_gates = []
-            for gate in individual.gates[qubit]:
-                if gate.gate_type != GateType.ID:
-                    qubit_gates.append(gate)
-            optimized_gates.append(qubit_gates)
-            max_depth = max(max_depth, len(qubit_gates))
-        
-        # Pad with identities to maintain rectangular structure
-        for qubit in range(self.num_qubits):
-            while len(optimized_gates[qubit]) < max_depth:
-                optimized_gates[qubit].append(Gate(GateType.ID, [qubit]))
-                
-        return CircuitIndividual(self.num_qubits, max_depth, optimized_gates)
+        if not non_empty_layers:
+            # If all layers are empty, keep at least one
+            non_empty_layers = [[]]
+            
+        return CircuitIndividual(individual.num_qubits, len(non_empty_layers), non_empty_layers)
     
     def run_evolution(self, from_scratch: bool = True, use_hybrid: bool = True, 
                       hybrid_interval: int = 25) -> CircuitIndividual:
@@ -665,8 +708,8 @@ def calculate_circuit_metrics(circuit: CircuitIndividual, target_unitary: np.nda
     
     # Count different gate types
     gate_counts = {gt: 0 for gt in GateType}
-    for qubit_gates in circuit.gates:
-        for gate in qubit_gates:
+    for layer in circuit.layers:
+        for gate in layer:
             gate_counts[gate.gate_type] += 1
             
     return {
