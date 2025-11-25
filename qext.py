@@ -47,13 +47,13 @@ class Gate:
 class CircuitIndividual:
     """Represents an individual quantum circuit in the population"""
     
-    def __init__(self, num_qubits: int, depth: int, layers: List[List[Gate]] = None):
+    def __init__(self, num_qubits: int, depth: int, layers: Optional[List[List[Gate]]] = None):
         self.num_qubits = num_qubits
         self.depth = depth
         
         # Represent circuit as layers: each layer contains gates that can be applied in parallel
         if layers is None:
-            self.layers = [[] for _ in range(depth)]
+            self.layers: List[List[Gate]] = [[] for _ in range(depth)]
         else:
             self.layers = layers
             
@@ -124,7 +124,7 @@ class CircuitIndividual:
                     parameters.append(gate.angle)
         return parameters
     
-    def set_parameters(self, parameters: List[float]):
+    def set_parameters(self, parameters):
         """Set parameterized gate angles"""
         param_idx = 0
         for layer in self.layers:
@@ -166,7 +166,7 @@ class QuantumEvolutionaryOptimizer:
                  mutation_rate: float = 0.85,
                  offspring_rate: float = 0.3,
                  replace_rate: float = 0.3,
-                 gate_set: List[GateType] = None,
+                 gate_set: Optional[List[GateType]] = None,
                  alpha: float = 10.0,
                  beta: float = 1.0):
         
@@ -200,9 +200,9 @@ class QuantumEvolutionaryOptimizer:
         self.best_individual: Optional[CircuitIndividual] = None
         self.fitness_history: List[float] = []
         
-    def initialize_population(self, initial_depth: int = None, from_target: bool = False):
+    def initialize_population(self, initial_depth: int = 0, from_target: bool = False):
         """Initialize population with random circuits or from target"""
-        if initial_depth is None:
+        if initial_depth <= 0:
             initial_depth = self.target_depth
             
         self.population = []
@@ -270,7 +270,7 @@ class QuantumEvolutionaryOptimizer:
         if self.target_depth > 1:
             normalized_depth = (individual.depth - 1) / (self.target_depth - 1)
         else:
-            normalized_depth = 0
+            normalized_depth = 0.0
             
         # Multi-objective fitness (equation 9 from paper)
         fitness = self.alpha * fidelity - self.beta * normalized_depth
@@ -289,7 +289,8 @@ class QuantumEvolutionaryOptimizer:
         elif method == "roulette":
             return self._roulette_selection()
         else:  # random
-            return random.sample(self.population, 2)
+            sample = random.sample(self.population, 2)
+            return (sample.pop(), sample.pop())
     
     def _tournament_selection(self, tournament_size: int = 3) -> Tuple[CircuitIndividual, CircuitIndividual]:
         """Tournament selection"""
@@ -312,7 +313,7 @@ class QuantumEvolutionaryOptimizer:
         
         # Select first parent
         pick1 = random.uniform(0, total_fitness)
-        current1 = 0
+        current1 = 0.0
         for ind, fitness in zip(self.population, shifted_fitnesses):
             current1 += fitness
             if current1 >= pick1:
@@ -321,7 +322,7 @@ class QuantumEvolutionaryOptimizer:
                 
         # Select second parent (different from first)
         pick2 = random.uniform(0, total_fitness - shifted_fitnesses[self.population.index(parent1)])
-        current2 = 0
+        current2 = 0.0
         for ind, fitness in zip(self.population, shifted_fitnesses):
             if ind == parent1:
                 continue
@@ -689,10 +690,11 @@ class QuantumEvolutionaryOptimizer:
                 
             self.fitness_history.append(current_best.fitness)
             
-            if generation % 100 == 0:
+            if generation % 10 == 0:
                 print(f"Generation {generation}: Best fitness = {current_best.fitness:.4f}, "
                       f"Fidelity = {current_best.fidelity:.4f}, Depth = {current_best.depth}")
         
+        assert self.best_individual is not None
         return self.best_individual
 
 # Example usage and helper functions
@@ -762,3 +764,9 @@ if __name__ == "__main__":
     print(f"Fidelity: {target_metrics['fidelity']:.4f} -> {best_metrics['fidelity']:.4f}")
     print(f"Depth: {target_metrics['depth']} -> {best_metrics['depth']}")
     print(f"CX gates: {target_metrics['num_cx_gates']} -> {best_metrics['num_cx_gates']}")
+
+    print("Target circuit:")
+    print(target_circuit.to_qiskit_circuit().draw(output="text"))
+
+    print("Best generated circuit (by Fitness):")
+    print(best_circuit.to_qiskit_circuit().draw(output="text"))
