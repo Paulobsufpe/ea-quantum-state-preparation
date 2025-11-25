@@ -1,0 +1,10 @@
+[project]
+name = "ea-quantum-state-preparation"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+[tool.pylsp-mypy]
+enabled = false
+
+[tool.setuptools]
+py-modules = ["qext"]
