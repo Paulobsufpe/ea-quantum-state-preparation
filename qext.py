@@ -80,7 +80,6 @@ class CircuitIndividual:
             for gate in layer:
                 if gate.gate_type == GateType.ID:
                     continue  # Skip identity gates
-                    
                 if gate.gate_type == GateType.X:
                     for qubit in gate.qubits:
                         qc.x(qubit)
@@ -133,6 +132,13 @@ class CircuitIndividual:
                     if param_idx < len(parameters):
                         gate.angle = parameters[param_idx]
                         param_idx += 1
+
+    def gate_counts(self):
+        gate_counts = {gt: 0 for gt in GateType}
+        for layer in self.layers:
+            for gate in layer:
+                gate_counts[gate.gate_type] += 1
+        return gate_counts
 
 class CrossoverType(Enum):
     SINGLE_POINT = "single_point"
@@ -646,7 +652,7 @@ class QuantumEvolutionaryOptimizer:
         return CircuitIndividual(individual.num_qubits, len(non_empty_layers), non_empty_layers)
     
     def run_evolution(self, from_scratch: bool = True, use_hybrid: bool = True, 
-                      hybrid_interval: int = 25) -> CircuitIndividual:
+                      hybrid_interval: int = 20) -> CircuitIndividual:
         """Run the complete evolutionary algorithm"""
         
         print("Initializing population...")
@@ -689,7 +695,7 @@ class QuantumEvolutionaryOptimizer:
                 self.best_individual = current_best
                 
             self.fitness_history.append(current_best.fitness)
-            
+
             if generation % 10 == 0:
                 print(f"Generation {generation}: Best fitness = {current_best.fitness:.4f}, "
                       f"Fidelity = {current_best.fidelity:.4f}, Depth = {current_best.depth}")
@@ -722,8 +728,7 @@ def calculate_circuit_metrics(circuit: CircuitIndividual, target_unitary: np.nda
         'num_cx_gates': gate_counts[GateType.CX]
     }
 
-# Example usage
-if __name__ == "__main__":
+def main(pop_sz = 50, num_of_gen=100):
     # Create a random target circuit
     num_qubits = 3
     target_depth = 10
@@ -733,13 +738,15 @@ if __name__ == "__main__":
     print("Target circuit created")
     print(f"Target depth: {target_depth}")
     print(f"Target unitary shape: {target_unitary.shape}")
+    print(f"\nPopulation size: {pop_sz}")
+    print(f"Generations: {num_of_gen}")
     
     # Initialize optimizer
     optimizer = QuantumEvolutionaryOptimizer(
         num_qubits=num_qubits,
         target_unitary=target_unitary,
-        population_size=50,  # Smaller for demo
-        generations=100,     # Smaller for demo
+        population_size=pop_sz,  # Smaller for demo
+        generations=num_of_gen,  # Smaller for demo
         crossover_rate=0.85,
         mutation_rate=0.85,
         offspring_rate=0.3,
@@ -756,17 +763,22 @@ if __name__ == "__main__":
     print(f"Best circuit fidelity: {best_circuit.fidelity:.4f}")
     print(f"Best circuit depth: {best_circuit.depth}")
     
-    # Compare with target
-    target_metrics = calculate_circuit_metrics(target_circuit, target_unitary)
-    best_metrics = calculate_circuit_metrics(best_circuit, target_unitary)
-    
-    print(f"\nTarget vs Optimized:")
-    print(f"Fidelity: {target_metrics['fidelity']:.4f} -> {best_metrics['fidelity']:.4f}")
-    print(f"Depth: {target_metrics['depth']} -> {best_metrics['depth']}")
-    print(f"CX gates: {target_metrics['num_cx_gates']} -> {best_metrics['num_cx_gates']}")
+    print("\nTarget vs Optimized:")
+    print(f"Fidelity: {target_circuit.calculate_fidelity(target_unitary):.4f} -> {best_circuit.fidelity:.4f}")
+    print(f"Depth: {target_circuit.depth} -> {best_circuit.depth}")
+    print(f"CX gates: {target_circuit.gate_counts()[GateType.CX]} -> {best_circuit.gate_counts()[GateType.CX]}")
 
-    print("Target circuit:")
+    print("\nTarget circuit:")
     print(target_circuit.to_qiskit_circuit().draw(output="text"))
 
     print("Best generated circuit (by Fitness):")
     print(best_circuit.to_qiskit_circuit().draw(output="text"))
+
+if __name__ == "__main__":
+    from sys import argv
+    if len(argv) >= 3:
+        main(int(argv[1]), int(argv[2]))
+    elif len(argv) == 2:
+        main(int(argv[1]))
+    else:
+        main()
