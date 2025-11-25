@@ -134,17 +134,17 @@ static inline QkObs *build_observable(void) {
 }
 
 static inline QkCircuit* test() {
-  for (int i = 0; i < 12; ++i) {
-    std::println("{}", random_int(1, 100));
-  }
-  std::println("------------------------");
-  for (int i = 0; i < 12; ++i) {
-    std::println("{}", random_double(1, 100));
-  }
-  std::println("------------------------");
-  for (int i = 0; i < 12; ++i) {
-    std::println("{}", random_bool());
-  }
+  // for (int i = 0; i < 12; ++i) {
+  //   std::println("{}", random_int(1, 100));
+  // }
+  // std::println("------------------------");
+  // for (int i = 0; i < 12; ++i) {
+  //   std::println("{}", random_double(1, 100));
+  // }
+  // std::println("------------------------");
+  // for (int i = 0; i < 12; ++i) {
+  //   std::println("{}", random_bool());
+  // }
   QkCircuit *qc = qk_circuit_new(3, 0);
   // H gate on qubit 0, putting this qubit in a superposition of |0> + |1>.
   qk_circuit_gate(qc, QkGate_H, (uint32_t[]){0}, NULL);
