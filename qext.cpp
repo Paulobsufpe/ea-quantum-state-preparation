@@ -13,6 +13,7 @@
 #include <numeric>
 #include <string>
 #include <utility>
+#include <omp.h>
 
 namespace py = pybind11;
 
@@ -135,14 +136,21 @@ public:
     }
 };
 
-// Random number generator
+// Thread-safe random number generator
 class RandomGenerator {
 private:
-    std::mt19937 gen;
-    std::uniform_real_distribution<double> real_dist;
+    // Use thread-local storage for random number generators
+    static thread_local std::mt19937 gen;
+    static thread_local std::uniform_real_distribution<double> real_dist;
     
 public:
-    RandomGenerator() : gen(std::random_device{}()), real_dist(0.0, 1.0) {}
+    RandomGenerator() {
+        // Initialize thread-local generators if not already initialized
+        if (gen == std::mt19937{}) {
+            std::random_device rd;
+            gen.seed(rd() + omp_get_thread_num() * 1000); // Different seed per thread
+        }
+    }
     
     double random_double(double min = 0.0, double max = 1.0) {
         return min + (max - min) * real_dist(gen);
@@ -183,6 +191,10 @@ public:
     }
 };
 
+// Define thread-local static members
+thread_local std::mt19937 RandomGenerator::gen;
+thread_local std::uniform_real_distribution<double> RandomGenerator::real_dist(0.0, 1.0);
+
 // Crossover types
 enum class CrossoverType {
     SINGLE_POINT, UNIFORM, MULTI_POINT, BLOCKWISE
@@ -213,8 +225,6 @@ private:
     std::shared_ptr<CircuitIndividual> best_individual;
     std::vector<double> fitness_history;
     
-    RandomGenerator rng;
-    
     // Fitness function callback
     std::function<double(const CircuitIndividual&)> fitness_func;
     
@@ -233,8 +243,10 @@ public:
         fitness_func = std::move(func);
     }
     
-    // Create random circuit
+    // Create random circuit - thread-safe
     CircuitIndividual create_random_circuit(int depth) {
+        RandomGenerator rng; // Thread-local RNG
+        
         std::vector<std::vector<Gate>> layers;
         
         for (int i = 0; i < depth; ++i) {
@@ -279,13 +291,19 @@ public:
         best_individual.reset();
         fitness_history.clear();
         
+        // Parallel population initialization
+        population.resize(population_size);
+        
+        #pragma omp parallel for
         for (int i = 0; i < population_size; ++i) {
-            population.push_back(create_random_circuit(initial_depth));
+            population[i] = create_random_circuit(initial_depth);
         }
     }
     
     // Tournament selection
     std::pair<CircuitIndividual, CircuitIndividual> tournament_selection(int tournament_size = 3) {
+        RandomGenerator rng; // Thread-local RNG
+        
         auto tournament1 = rng.random_sample(population, tournament_size);
         auto tournament2 = rng.random_sample(population, tournament_size);
         
@@ -313,6 +331,8 @@ public:
     
     // Roulette wheel selection
     std::pair<CircuitIndividual, CircuitIndividual> roulette_selection() {
+        RandomGenerator rng; // Thread-local RNG
+        
         if (population.empty()) {
             throw std::runtime_error("Cannot select from empty population");
         }
@@ -396,6 +416,8 @@ public:
     // Crossover operations
     CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2,
                                CrossoverType method = CrossoverType::UNIFORM) {
+        RandomGenerator rng; // Thread-local RNG
+        
         if (rng.random_double() > crossover_rate || parent1.layers.empty() || parent2.layers.empty()) {
             return rng.random_bool() ? parent1 : parent2;
         }
@@ -424,6 +446,8 @@ private:
     }
     
     CircuitIndividual single_point_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        RandomGenerator rng;
+        
         int child_depth = std::max(p1.depth, p2.depth);
         if (child_depth <= 1) return p1;
         
@@ -442,6 +466,8 @@ private:
     }
     
     CircuitIndividual uniform_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        RandomGenerator rng;
+        
         int child_depth = std::max(p1.depth, p2.depth);
         
         std::vector<std::vector<Gate>> child_layers;
@@ -457,6 +483,8 @@ private:
     }
     
     CircuitIndividual multi_point_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        RandomGenerator rng;
+        
         int child_depth = std::max(p1.depth, p2.depth);
         int num_points = rng.random_int(2, std::min(5, child_depth));
         
@@ -487,6 +515,8 @@ private:
     }
     
     CircuitIndividual blockwise_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        RandomGenerator rng;
+        
         int child_depth = std::max(p1.depth, p2.depth);
         if (child_depth <= 0 || p1.num_qubits <= 1) return p1;
         
@@ -522,6 +552,8 @@ private:
 public:
     // Mutation operations
     CircuitIndividual mutate(CircuitIndividual individual) {
+        RandomGenerator rng; // Thread-local RNG
+        
         if (rng.random_double() > mutation_rate) {
             return individual;
         }
@@ -561,6 +593,8 @@ public:
     
 private:
     CircuitIndividual mutate_single_gate(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         if (ind.layers.empty()) return ind;
         
         int layer_idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
@@ -592,6 +626,8 @@ private:
     }
     
     CircuitIndividual mutate_gate_swap(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         if (ind.layers.size() < 2) return ind;
         
         std::vector<int> indices(ind.layers.size());
@@ -609,6 +645,8 @@ private:
     }
     
     CircuitIndividual mutate_column_swap(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         if (ind.layers.size() >= 2) {
             std::vector<int> indices(ind.layers.size());
             std::iota(indices.begin(), indices.end(), 0);
@@ -639,6 +677,8 @@ private:
     }
     
     CircuitIndividual mutate_delete_column(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         if (ind.depth > 1) {
             int idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
             ind.layers.erase(ind.layers.begin() + idx);
@@ -648,6 +688,8 @@ private:
     }
     
     CircuitIndividual mutate_add_cx_gate(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         if (!ind.layers.empty()) {
             int layer_idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
             auto used = ind.get_used_qubits(layer_idx);
@@ -662,6 +704,8 @@ private:
     }
     
     CircuitIndividual mutate_add_single_gate(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         if (!ind.layers.empty()) {
             int layer_idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
             auto used = ind.get_used_qubits(layer_idx);
@@ -690,6 +734,8 @@ private:
     }
     
     CircuitIndividual mutate_parameters(CircuitIndividual ind) {
+        RandomGenerator rng;
+        
         for (auto& layer : ind.layers) {
             for (auto& gate : layer) {
                 if (gate.type == GateType::RZ) {
@@ -720,23 +766,31 @@ public:
         return CircuitIndividual(ind.num_qubits, static_cast<int>(non_empty_layers.size()), std::move(non_empty_layers));
     }
     
+    // Parallel fitness evaluation
+    void evaluate_population_fitness(std::vector<CircuitIndividual>& individuals) {
+        if (!fitness_func) return;
+        
+        #pragma omp parallel for
+        for (size_t i = 0; i < individuals.size(); ++i) {
+            individuals[i].fitness = fitness_func(individuals[i]);
+        }
+    }
+    
     // Main evolution loop
     CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "tournament") {
         initialize_population(target_depth, !from_scratch);
         
-        // Evaluate initial population
-        for (auto& ind : population) {
-            if (fitness_func) {
-                ind.fitness = fitness_func(ind);
-            }
-        }
+        // Evaluate initial population in parallel
+        evaluate_population_fitness(population);
         
         int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
         int num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
         
         for (int generation = 0; generation < generations; ++generation) {
-            // Create offspring
-            std::vector<CircuitIndividual> offspring;
+            // Create offspring in parallel
+            std::vector<CircuitIndividual> offspring(num_offspring);
+            
+            #pragma omp parallel for
             for (int i = 0; i < num_offspring; ++i) {
                 // FIX: Initialize parents directly without default construction
                 std::pair<CircuitIndividual, CircuitIndividual> parents = [&]() -> std::pair<CircuitIndividual, CircuitIndividual> {
@@ -744,6 +798,7 @@ public:
                         return (selection_method == "roulette") ? roulette_selection() : tournament_selection();
                     } catch (const std::exception& e) {
                         // Fallback to random selection
+                        RandomGenerator rng;
                         auto samples = rng.random_sample(population, 2);
                         if (samples.size() >= 2) {
                             return {samples[0], samples[1]};
@@ -758,14 +813,13 @@ public:
                 auto child = crossover(parents.first, parents.second);
                 child = mutate(std::move(child));
                 child = optimize_circuit_structure(std::move(child));
-                
-                if (fitness_func) {
-                    child.fitness = fitness_func(child);
-                }
-                offspring.push_back(std::move(child));
+                offspring[i] = std::move(child);
             }
             
-            // Replace worst individuals
+            // Evaluate offspring in parallel
+            evaluate_population_fitness(offspring);
+            
+            // Replace worst individuals (sequential - small operation)
             std::sort(population.begin(), population.end(),
                      [](const CircuitIndividual& a, const CircuitIndividual& b) {
                          return a.fitness < b.fitness;
@@ -796,9 +850,13 @@ public:
                     // Log every 10 generations
                     if (generation % 10 == 0) {
                         int non_id_gates = best_it->count_non_id_gates();
-                        std::cout << "Generation " << generation << ": Best fitness = " << best_it->fitness
-                                 << ", Depth = " << best_it->depth 
-                                 << ", Non-ID gates = " << non_id_gates << std::endl;
+                        #pragma omp critical
+                        {
+                            std::cout << "Generation " << generation << ": Best fitness = " << best_it->fitness
+                                     << ", Depth = " << best_it->depth 
+                                     << ", Non-ID gates = " << non_id_gates 
+                                     << " (Threads: " << omp_get_max_threads() << ")" << std::endl;
+                        }
                     }
                 }
             }
@@ -828,7 +886,7 @@ public:
 
 // Pybind11 module
 PYBIND11_MODULE(qext, m) {
-    m.doc() = "High-performance quantum circuit optimization using evolutionary algorithms";
+    m.doc() = "High-performance quantum circuit optimization using evolutionary algorithms with OpenMP parallelization";
     
     // GateType enum
     py::enum_<GateType>(m, "GateType")

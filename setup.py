@@ -13,7 +13,8 @@ ext_modules = [
         ],
         language='c++',
         cxx_std=17,
-        extra_compile_args=['-O3', '-march=native', '-ffast-math']
+        extra_compile_args=['-O3', '-march=native', '-ffast-math', '-fopenmp'],
+        extra_link_args=['-O3', '-march=native', '-ffast-math', '-fopenmp']
     ),
 ]
 
