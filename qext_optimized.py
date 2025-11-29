@@ -140,21 +140,25 @@ class OptimizedQuantumEvolver:
             'population_size': len(population)
         }
 
+# Helper function to create random circuits using C++
+def create_random_circuit_cpp(num_qubits: int, depth: int) -> CircuitIndividual:
+    """Create a random circuit using the C++ implementation"""
+    gate_set = [GateType.ID, GateType.X, GateType.SX, GateType.RZ, GateType.CX]
+    temp_optimizer = QuantumEvolutionaryOptimizer(
+        num_qubits, 1, 1, 0.85, 0.85, 0.3, 0.3, 10.0, 1.0, depth, gate_set
+    )
+    return temp_optimizer.create_random_circuit(depth)
+
 # Example usage
 def benchmark_optimization():
     """Benchmark the optimized C++ implementation"""
-    print("Benchmarking C++ vs Python implementation...")
+    print("Benchmarking C++ implementation...")
     
-    # Create a simple target circuit
+    # Create a simple target circuit using C++
     num_qubits = 3
     target_depth = 8
     
-    # Create target using C++ 
-    gate_set = [GateType.ID, GateType.X, GateType.SX, GateType.RZ, GateType.CX]
-    cpp_optimizer = QuantumEvolutionaryOptimizer(
-        num_qubits, 10, 1, 0.85, 0.85, 0.3, 0.3, 10.0, 1.0, target_depth, gate_set
-    )
-    target_circuit = cpp_optimizer.create_random_circuit(target_depth)
+    target_circuit = create_random_circuit_cpp(num_qubits, target_depth)
     
     # Test configurations
     configs = [

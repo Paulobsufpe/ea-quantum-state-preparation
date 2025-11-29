@@ -10,6 +10,7 @@
 #include <cmath>
 #include <iostream>
 #include <unordered_map>
+#include <numeric>
 
 namespace py = pybind11;
 
@@ -116,10 +117,9 @@ class RandomGenerator {
 private:
     std::mt19937 gen;
     std::uniform_real_distribution<double> real_dist;
-    std::uniform_int_distribution<int> int_dist;
     
 public:
-    RandomGenerator() : gen(std::random_device{}()), real_dist(0.0, 1.0), int_dist(0, INT_MAX) {}
+    RandomGenerator() : gen(std::random_device{}()), real_dist(0.0, 1.0) {}
     
     double random_double(double min = 0.0, double max = 1.0) {
         return min + (max - min) * real_dist(gen);
@@ -208,7 +208,7 @@ public:
         fitness_func = std::move(func);
     }
     
-    // Create random circuit
+    // Create random circuit - PUBLIC METHOD
     CircuitIndividual create_random_circuit(int depth) {
         std::vector<std::vector<Gate>> layers;
         
@@ -762,6 +762,7 @@ PYBIND11_MODULE(qext, m) {
              py::arg("replace_rate"), py::arg("alpha"), py::arg("beta"), py::arg("target_depth"),
              py::arg("gate_set"))
         .def("set_fitness_function", &QuantumEvolutionaryOptimizer::set_fitness_function)
+        .def("create_random_circuit", &QuantumEvolutionaryOptimizer::create_random_circuit) // ADDED THIS LINE
         .def("initialize_population", &QuantumEvolutionaryOptimizer::initialize_population,
              py::arg("initial_depth"), py::arg("from_target") = false)
         .def("run_evolution", &QuantumEvolutionaryOptimizer::run_evolution,
