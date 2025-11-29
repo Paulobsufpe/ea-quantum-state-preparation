@@ -8,6 +8,7 @@ try:
     HAS_QISKIT = True
 except ImportError:
     HAS_QISKIT = False
+    print("Warning: Qiskit not available. Circuit visualization disabled.")
 
 # Import the C++ extension
 try:
@@ -64,28 +65,33 @@ class OptimizedQuantumEvolver:
         
     def _fitness_wrapper(self, circuit: CircuitIndividual) -> float:
         """Wrapper for fitness function that C++ can call"""
-        fidelity = self.calculate_fidelity(circuit, self.target_unitary)
-        
-        # Normalize depth
-        if self.target_depth > 1:
-            normalized_depth = (circuit.depth - 1) / (self.target_depth - 1)
-        else:
-            normalized_depth = 0.0
+        try:
+            fidelity = self.calculate_fidelity(circuit, self.target_unitary)
             
-        # Multi-objective fitness
-        return 10.0 * fidelity - 1.0 * normalized_depth
+            # Normalize depth - BUG FIX: Handle division by zero
+            if self.target_depth > 1:
+                normalized_depth = (circuit.depth - 1) / (self.target_depth - 1)
+            else:
+                normalized_depth = 0.0
+                
+            # Multi-objective fitness
+            fitness = 10.0 * fidelity - 1.0 * normalized_depth
+            return max(fitness, 0.0)  # Ensure non-negative fitness
+        except Exception as e:
+            print(f"Error in fitness calculation: {e}")
+            return 0.0
     
-    def circuit_to_unitary(self, circuit: CircuitIndividual) -> np.ndarray:
-        """Convert C++ circuit to unitary matrix using Qiskit"""
+    def circuit_to_qiskit(self, circuit: CircuitIndividual) -> 'QuantumCircuit':
+        """Convert C++ circuit to Qiskit QuantumCircuit"""
         if not HAS_QISKIT:
-            return np.eye(2 ** self.num_qubits)
+            raise ImportError("Qiskit is required for circuit visualization")
             
-        qc = QuantumCircuit(self.num_qubits)
+        qc = QuantumCircuit(circuit.num_qubits)
         
         for layer in circuit.layers:
             for gate in layer:
                 if gate.type == GateType.ID:
-                    continue
+                    continue  # Skip identity gates
                     
                 if gate.type == GateType.X:
                     for qubit in gate.qubits:
@@ -102,24 +108,39 @@ class OptimizedQuantumEvolver:
                 elif gate.type == GateType.CX and len(gate.qubits) == 2:
                     qc.cx(gate.qubits[0], gate.qubits[1])
         
+        return qc
+    
+    def circuit_to_unitary(self, circuit: CircuitIndividual) -> np.ndarray:
+        """Convert C++ circuit to unitary matrix using Qiskit"""
+        if not HAS_QISKIT:
+            return np.eye(2 ** self.num_qubits)
+            
+        qc = self.circuit_to_qiskit(circuit)
         return Operator(qc).data
     
     def calculate_fidelity(self, circuit: CircuitIndividual, target_unitary: np.ndarray) -> float:
         """Calculate fidelity between circuit and target unitary"""
-        circuit_unitary = self.circuit_to_unitary(circuit)
-        fidelity = np.abs(np.trace(circuit_unitary.conj().T @ target_unitary)) ** 2
-        fidelity /= (2 ** self.num_qubits) ** 2
-        return float(fidelity)
+        try:
+            circuit_unitary = self.circuit_to_unitary(circuit)
+            fidelity = np.abs(np.trace(circuit_unitary.conj().T @ target_unitary)) ** 2
+            fidelity /= (2 ** self.num_qubits) ** 2
+            return float(fidelity)
+        except Exception as e:
+            print(f"Error calculating fidelity: {e}")
+            return 0.0
     
     def run_evolution(self, from_scratch: bool = True, selection_method: str = "tournament") -> CircuitIndividual:
         """Run the evolutionary optimization"""
         print("Starting optimized C++ evolution...")
+        print(f"Population: {self.cpp_optimizer.population_size}, Generations: {self.cpp_optimizer.generations}")
+        print(f"Qubits: {self.num_qubits}, Target depth: {self.target_depth}")
+        
         start_time = time.time()
         
         best_circuit = self.cpp_optimizer.run_evolution(from_scratch, selection_method)
         
         end_time = time.time()
-        print(f"Optimization completed in {end_time - start_time:.2f} seconds")
+        print(f"\nOptimization completed in {end_time - start_time:.2f} seconds")
         
         return best_circuit
     
@@ -127,8 +148,12 @@ class OptimizedQuantumEvolver:
         """Get statistics about the current population"""
         population = self.cpp_optimizer.get_population()
         
+        if not population:
+            return {}
+            
         fitnesses = [ind.fitness for ind in population]
         depths = [ind.depth for ind in population]
+        non_id_gates = [ind.count_non_id_gates() for ind in population]
         
         return {
             'avg_fitness': np.mean(fitnesses),
@@ -137,8 +162,30 @@ class OptimizedQuantumEvolver:
             'avg_depth': np.mean(depths),
             'min_depth': np.min(depths),
             'max_depth': np.max(depths),
+            'avg_non_id_gates': np.mean(non_id_gates),
             'population_size': len(population)
         }
+    
+    def print_circuit_info(self, circuit: CircuitIndividual, name: str = "Circuit"):
+        """Print detailed information about a circuit"""
+        print(f"\n{name}:")
+        print(f"  Depth: {circuit.depth}")
+        print(f"  Fitness: {circuit.fitness:.4f}")
+        print(f"  Non-ID gates: {circuit.count_non_id_gates()}")
+        
+        gate_counts = circuit.gate_counts()
+        print("  Gate counts:")
+        for gate_type, count in gate_counts.items():
+            if count > 0:
+                print(f"    {gate_type}: {count}")
+        
+        # Print Qiskit circuit if available
+        if HAS_QISKIT:
+            try:
+                qc = self.circuit_to_qiskit(circuit)
+                print(f"  Qiskit circuit:\n{qc.draw(output='text')}")
+            except Exception as e:
+                print(f"  Could not generate Qiskit circuit: {e}")
 
 # Helper function to create random circuits using C++
 def create_random_circuit_cpp(num_qubits: int, depth: int) -> CircuitIndividual:
@@ -150,40 +197,61 @@ def create_random_circuit_cpp(num_qubits: int, depth: int) -> CircuitIndividual:
     return temp_optimizer.create_random_circuit(depth)
 
 # Example usage
-def benchmark_optimization():
-    """Benchmark the optimized C++ implementation"""
-    print("Benchmarking C++ implementation...")
+def main():
+    """Main function with proper logging and circuit visualization"""
+    print("=== Quantum Circuit Optimization with C++ Backend ===\n")
     
     # Create a simple target circuit using C++
     num_qubits = 3
     target_depth = 8
     
+    print("Creating target circuit...")
     target_circuit = create_random_circuit_cpp(num_qubits, target_depth)
     
-    # Test configurations
-    configs = [
-        {"pop_size": 50, "generations": 100},
-        {"pop_size": 100, "generations": 200},
-    ]
+    # Initialize optimizer
+    cpp_evolver = OptimizedQuantumEvolver(
+        num_qubits=num_qubits,
+        target_circuit=target_circuit,
+        population_size=50,
+        generations=100,
+        crossover_rate=0.85,
+        mutation_rate=0.85,
+        offspring_rate=0.3,
+        replace_rate=0.3
+    )
     
-    for config in configs:
-        print(f"\nTesting with population {config['pop_size']}, generations {config['generations']}")
-        
-        # C++ implementation
-        cpp_evolver = OptimizedQuantumEvolver(
-            num_qubits=num_qubits,
-            target_circuit=target_circuit,
-            population_size=config['pop_size'],
-            generations=config['generations']
-        )
-        
-        start_time = time.time()
-        best_cpp = cpp_evolver.run_evolution()
-        cpp_time = time.time() - start_time
-        
-        print(f"C++ implementation: {cpp_time:.2f}s")
-        print(f"Best fitness: {best_cpp.fitness:.4f}")
-        print(f"Best depth: {best_cpp.depth}")
+    # Print target circuit info
+    cpp_evolver.print_circuit_info(target_circuit, "Target Circuit")
+    
+    # Run evolution
+    print("\n" + "="*50)
+    print("Starting evolution...")
+    print("="*50)
+    
+    start_time = time.time()
+    best_circuit = cpp_evolver.run_evolution(from_scratch=True, selection_method="tournament")
+    evolution_time = time.time() - start_time
+    
+    # Print results
+    print("\n" + "="*50)
+    print("RESULTS")
+    print("="*50)
+    
+    cpp_evolver.print_circuit_info(best_circuit, "Best Circuit")
+    
+    # Calculate final fidelity
+    final_fidelity = cpp_evolver.calculate_fidelity(best_circuit, cpp_evolver.target_unitary)
+    print(f"\nFinal fidelity with target: {final_fidelity:.4f}")
+    
+    # Print population statistics
+    stats = cpp_evolver.get_population_stats()
+    print(f"\nFinal population statistics:")
+    print(f"  Average fitness: {stats['avg_fitness']:.4f}")
+    print(f"  Best fitness: {stats['max_fitness']:.4f}")
+    print(f"  Average depth: {stats['avg_depth']:.2f}")
+    print(f"  Average non-ID gates: {stats['avg_non_id_gates']:.2f}")
+    
+    print(f"\nTotal evolution time: {evolution_time:.2f} seconds")
 
 if __name__ == "__main__":
-    benchmark_optimization()
+    main()

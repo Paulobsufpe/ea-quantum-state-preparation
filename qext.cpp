@@ -11,6 +11,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <numeric>
+#include <string>
 
 namespace py = pybind11;
 
@@ -50,15 +51,26 @@ public:
         : num_qubits(nq), depth(d), layers(std::move(l)), fitness(-1e9), fidelity(0.0), normalized_depth(0.0) {
         if (layers.empty()) {
             layers.resize(depth);
+        } else {
+            // Ensure depth matches layers size - BUG FIX
+            depth = layers.size();
         }
+    }
+    
+    // Copy constructor
+    CircuitIndividual(const CircuitIndividual& other)
+        : num_qubits(other.num_qubits), depth(other.depth), layers(other.layers),
+          fitness(other.fitness), fidelity(other.fidelity), normalized_depth(other.normalized_depth) {
     }
     
     // Get used qubits in a layer
     std::vector<bool> get_used_qubits(int layer_idx) const {
         std::vector<bool> used(num_qubits, false);
-        for (const auto& gate : layers[layer_idx]) {
-            for (int q : gate.qubits) {
-                if (q < num_qubits) used[q] = true;
+        if (layer_idx >= 0 && layer_idx < layers.size()) {
+            for (const auto& gate : layers[layer_idx]) {
+                for (int q : gate.qubits) {
+                    if (q < num_qubits) used[q] = true;
+                }
             }
         }
         return used;
@@ -110,6 +122,19 @@ public:
         }
         return counts;
     }
+    
+    // Get number of non-identity gates
+    int count_non_id_gates() const {
+        int count = 0;
+        for (const auto& layer : layers) {
+            for (const auto& gate : layer) {
+                if (gate.type != GateType::ID) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
 };
 
 // Random number generator
@@ -142,6 +167,7 @@ public:
     
     template<typename T>
     std::vector<T> random_sample(const std::vector<T>& population, int k) {
+        if (k <= 0) return {};
         if (k >= population.size()) return population;
         
         std::vector<T> result;
@@ -216,7 +242,9 @@ public:
             std::vector<Gate> layer;
             std::vector<bool> used(num_qubits, false);
             
-            while (true) {
+            // Try to add some gates to this layer
+            int attempts = 0;
+            while (attempts < num_qubits * 2) { // Limit attempts to prevent infinite loop
                 auto available = get_available_qubits(used);
                 if (available.empty()) break;
                 
@@ -238,9 +266,8 @@ public:
                         layer.emplace_back(gate_type, std::vector<int>{qubit});
                     }
                     used[qubit] = true;
-                } else {
-                    break;
                 }
+                attempts++;
             }
             layers.push_back(std::move(layer));
         }
@@ -250,6 +277,9 @@ public:
     
     void initialize_population(int initial_depth, bool from_target = false) {
         population.clear();
+        best_individual.reset();
+        fitness_history.clear();
+        
         for (int i = 0; i < population_size; ++i) {
             population.push_back(create_random_circuit(initial_depth));
         }
@@ -259,6 +289,11 @@ public:
     std::pair<CircuitIndividual, CircuitIndividual> tournament_selection(int tournament_size = 3) {
         auto tournament1 = rng.random_sample(population, tournament_size);
         auto tournament2 = rng.random_sample(population, tournament_size);
+        
+        // Fix: Handle empty tournaments
+        if (tournament1.empty() || tournament2.empty()) {
+            return {population[0], population[std::min(1, (int)population.size()-1)]};
+        }
         
         auto best1 = *std::max_element(tournament1.begin(), tournament1.end(),
                                      [](const CircuitIndividual& a, const CircuitIndividual& b) {
@@ -274,6 +309,10 @@ public:
     
     // Roulette wheel selection
     std::pair<CircuitIndividual, CircuitIndividual> roulette_selection() {
+        if (population.empty()) {
+            throw std::runtime_error("Cannot select from empty population");
+        }
+        
         double total_fitness = 0.0;
         double min_fitness = 1e9;
         
@@ -289,10 +328,16 @@ public:
             total_fitness += ind.fitness + shift;
         }
         
+        if (total_fitness <= 0) {
+            // All individuals have same fitness, use random selection
+            auto samples = rng.random_sample(population, 2);
+            return {samples[0], samples[1]};
+        }
+        
         // Select first parent
         double pick1 = rng.random_double(0.0, total_fitness);
         double current = 0.0;
-        CircuitIndividual* parent1 = nullptr;
+        CircuitIndividual* parent1 = &population[0];
         
         for (auto& ind : population) {
             current += ind.fitness + shift;
@@ -302,10 +347,19 @@ public:
             }
         }
         
-        if (!parent1) parent1 = &population.back();
-        
-        // Select second parent
+        // Select second parent (different from first)
         double remaining_fitness = total_fitness - (parent1->fitness + shift);
+        if (remaining_fitness <= 0) {
+            // If only one individual has positive fitness, pick a random second parent
+            for (auto& ind : population) {
+                if (&ind != parent1) {
+                    return {*parent1, ind};
+                }
+            }
+            // If only one individual in population, duplicate it
+            return {*parent1, *parent1};
+        }
+        
         double pick2 = rng.random_double(0.0, remaining_fitness);
         current = 0.0;
         CircuitIndividual* parent2 = nullptr;
@@ -320,12 +374,14 @@ public:
         }
         
         if (!parent2) {
+            // Fallback: pick any individual that's not parent1
             for (auto& ind : population) {
                 if (&ind != parent1) {
                     parent2 = &ind;
                     break;
                 }
             }
+            if (!parent2) parent2 = parent1; // Only one individual
         }
         
         return {*parent1, *parent2};
@@ -334,7 +390,7 @@ public:
     // Crossover operations
     CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2,
                                CrossoverType method = CrossoverType::UNIFORM) {
-        if (rng.random_double() > crossover_rate) {
+        if (rng.random_double() > crossover_rate || parent1.layers.empty() || parent2.layers.empty()) {
             return rng.random_bool() ? parent1 : parent2;
         }
         
@@ -347,8 +403,9 @@ public:
                 return multi_point_crossover(parent1, parent2);
             case CrossoverType::BLOCKWISE:
                 return blockwise_crossover(parent1, parent2);
+            default:
+                return parent1;
         }
-        return parent1;
     }
     
 private:
@@ -361,15 +418,15 @@ private:
     }
     
     CircuitIndividual single_point_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
-        int child_depth = rng.random_bool() ? p1.depth : p2.depth;
+        int child_depth = std::max(p1.depth, p2.depth); // BUG FIX: Use max depth
         int crossover_point = rng.random_int(1, child_depth - 1);
         
         std::vector<std::vector<Gate>> child_layers;
         for (int i = 0; i < child_depth; ++i) {
             if (i < crossover_point) {
-                child_layers.push_back(i < p1.layers.size() ? p1.layers[i] : p2.layers[i]);
+                child_layers.push_back(i < p1.layers.size() ? p1.layers[i] : std::vector<Gate>());
             } else {
-                child_layers.push_back(i < p2.layers.size() ? p2.layers[i] : p1.layers[i]);
+                child_layers.push_back(i < p2.layers.size() ? p2.layers[i] : std::vector<Gate>());
             }
         }
         
@@ -377,16 +434,14 @@ private:
     }
     
     CircuitIndividual uniform_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
-        int child_depth = rng.random_bool() ? p1.depth : p2.depth;
-        std::vector<std::vector<Gate>> child_layers;
+        int child_depth = std::max(p1.depth, p2.depth); // BUG FIX
         
+        std::vector<std::vector<Gate>> child_layers;
         for (int i = 0; i < child_depth; ++i) {
-            if (rng.random_bool() && i < p1.layers.size()) {
-                child_layers.push_back(p1.layers[i]);
-            } else if (i < p2.layers.size()) {
-                child_layers.push_back(p2.layers[i]);
+            if (rng.random_bool()) {
+                child_layers.push_back(i < p1.layers.size() ? p1.layers[i] : std::vector<Gate>());
             } else {
-                child_layers.emplace_back();
+                child_layers.push_back(i < p2.layers.size() ? p2.layers[i] : std::vector<Gate>());
             }
         }
         
@@ -394,7 +449,7 @@ private:
     }
     
     CircuitIndividual multi_point_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
-        int child_depth = rng.random_bool() ? p1.depth : p2.depth;
+        int child_depth = std::max(p1.depth, p2.depth);
         int num_points = rng.random_int(2, std::min(5, child_depth));
         
         std::vector<int> points = {0, child_depth};
@@ -424,7 +479,7 @@ private:
     }
     
     CircuitIndividual blockwise_crossover(const CircuitIndividual& p1, const CircuitIndividual& p2) {
-        int child_depth = rng.random_bool() ? p1.depth : p2.depth;
+        int child_depth = std::max(p1.depth, p2.depth);
         int depth_split = rng.random_int(1, child_depth - 1);
         int qubit_split = rng.random_int(1, num_qubits - 1);
         
@@ -489,8 +544,9 @@ public:
                 return mutate_add_single_gate(std::move(individual));
             case MutationType::MUTATE_PARAMETERS:
                 return mutate_parameters(std::move(individual));
+            default:
+                return individual;
         }
-        return individual;
     }
     
 private:
@@ -504,7 +560,7 @@ private:
         GateType new_type = rng.random_choice(gate_set);
         const auto& old_gate = ind.layers[layer_idx][gate_idx];
         
-        if (new_type == GateType::CX && old_gate.qubits.size() >= 1) {
+        if (new_type == GateType::CX && !old_gate.qubits.empty()) {
             auto used = ind.get_used_qubits(layer_idx);
             auto available = ind.get_available_qubits(used);
             if (available.size() >= 1) {
@@ -513,9 +569,15 @@ private:
             }
         } else if (new_type == GateType::RZ) {
             double angle = rng.random_double(0.0, 2.0 * M_PI);
-            ind.layers[layer_idx][gate_idx] = Gate(GateType::RZ, old_gate.qubits, angle);
+            // For RZ gate, use only the first qubit if available
+            std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
+                                     std::vector<int>{old_gate.qubits[0]};
+            ind.layers[layer_idx][gate_idx] = Gate(GateType::RZ, qubits, angle);
         } else {
-            ind.layers[layer_idx][gate_idx] = Gate(new_type, old_gate.qubits);
+            // For other single-qubit gates, use the first qubit if available
+            std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
+                                     std::vector<int>{old_gate.qubits[0]};
+            ind.layers[layer_idx][gate_idx] = Gate(new_type, qubits);
         }
         
         return ind;
@@ -524,8 +586,8 @@ private:
     CircuitIndividual mutate_gate_swap(CircuitIndividual ind) {
         if (ind.layers.size() < 2) return ind;
         
-        auto layers = rng.random_sample(std::vector<int>(ind.layers.size()), 2);
-        int layer1 = layers[0], layer2 = layers[1];
+        auto layers_idx = rng.random_sample(std::vector<int>(ind.layers.size()), 2);
+        int layer1 = layers_idx[0], layer2 = layers_idx[1];
         
         if (!ind.layers[layer1].empty() && !ind.layers[layer2].empty()) {
             int gate1 = rng.random_int(0, ind.layers[layer1].size() - 1);
@@ -556,9 +618,11 @@ private:
     }
     
     CircuitIndividual mutate_add_random_column(CircuitIndividual ind) {
-        auto new_layer = create_random_circuit(1).layers[0];
-        ind.layers.push_back(std::move(new_layer));
-        ind.depth++;
+        auto new_circuit = create_random_circuit(1);
+        if (!new_circuit.layers.empty()) {
+            ind.layers.push_back(new_circuit.layers[0]);
+            ind.depth = ind.layers.size(); // BUG FIX: Update depth
+        }
         return ind;
     }
     
@@ -566,7 +630,7 @@ private:
         if (ind.depth > 1) {
             int idx = rng.random_int(0, ind.layers.size() - 1);
             ind.layers.erase(ind.layers.begin() + idx);
-            ind.depth--;
+            ind.depth = ind.layers.size(); // BUG FIX: Update depth
         }
         return ind;
     }
@@ -655,17 +719,24 @@ public:
             }
         }
         
-        int num_offspring = static_cast<int>(population_size * offspring_rate);
-        int num_replace = static_cast<int>(population_size * replace_rate);
+        int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
+        int num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
         
         for (int generation = 0; generation < generations; ++generation) {
             // Create offspring
             std::vector<CircuitIndividual> offspring;
             for (int i = 0; i < num_offspring; ++i) {
-                auto [parent1, parent2] = (selection_method == "roulette") ? 
-                                          roulette_selection() : tournament_selection();
+                std::pair<CircuitIndividual, CircuitIndividual> parents;
+                try {
+                    parents = (selection_method == "roulette") ? 
+                              roulette_selection() : tournament_selection();
+                } catch (const std::exception& e) {
+                    // Fallback to random selection
+                    auto samples = rng.random_sample(population, 2);
+                    parents = {samples[0], samples[1]};
+                }
                 
-                auto child = crossover(parent1, parent2);
+                auto child = crossover(parents.first, parents.second);
                 child = mutate(std::move(child));
                 child = optimize_circuit_structure(std::move(child));
                 
@@ -695,19 +766,28 @@ public:
                                               return a.fitness < b.fitness;
                                           });
             
-            if (!best_individual || best_it->fitness > best_individual->fitness) {
-                best_individual = std::make_shared<CircuitIndividual>(*best_it);
-            }
-            
-            fitness_history.push_back(best_it->fitness);
-            
-            if (generation % 100 == 0) {
-                std::cout << "Generation " << generation << ": Best fitness = " << best_it->fitness
-                         << ", Depth = " << best_it->depth << std::endl;
+            if (best_it != population.end()) {
+                if (!best_individual || best_it->fitness > best_individual->fitness) {
+                    best_individual = std::make_shared<CircuitIndividual>(*best_it);
+                }
+                
+                fitness_history.push_back(best_it->fitness);
+                
+                // Log every 10 generations - BUG FIX: Added proper depth logging
+                if (generation % 10 == 0) {
+                    int non_id_gates = best_it->count_non_id_gates();
+                    std::cout << "Generation " << generation << ": Best fitness = " << best_it->fitness
+                             << ", Depth = " << best_it->depth 
+                             << ", Non-ID gates = " << non_id_gates << std::endl;
+                }
             }
         }
         
-        return *best_individual;
+        if (best_individual) {
+            return *best_individual;
+        } else {
+            throw std::runtime_error("No best individual found");
+        }
     }
     
     // Getters
@@ -752,7 +832,8 @@ PYBIND11_MODULE(qext, m) {
         .def_readwrite("normalized_depth", &CircuitIndividual::normalized_depth)
         .def("get_parameters", &CircuitIndividual::get_parameters)
         .def("set_parameters", &CircuitIndividual::set_parameters)
-        .def("gate_counts", &CircuitIndividual::gate_counts);
+        .def("gate_counts", &CircuitIndividual::gate_counts)
+        .def("count_non_id_gates", &CircuitIndividual::count_non_id_gates);
     
     // QuantumEvolutionaryOptimizer class
     py::class_<QuantumEvolutionaryOptimizer>(m, "QuantumEvolutionaryOptimizer")
@@ -762,7 +843,7 @@ PYBIND11_MODULE(qext, m) {
              py::arg("replace_rate"), py::arg("alpha"), py::arg("beta"), py::arg("target_depth"),
              py::arg("gate_set"))
         .def("set_fitness_function", &QuantumEvolutionaryOptimizer::set_fitness_function)
-        .def("create_random_circuit", &QuantumEvolutionaryOptimizer::create_random_circuit) // ADDED THIS LINE
+        .def("create_random_circuit", &QuantumEvolutionaryOptimizer::create_random_circuit)
         .def("initialize_population", &QuantumEvolutionaryOptimizer::initialize_population,
              py::arg("initial_depth"), py::arg("from_target") = false)
         .def("run_evolution", &QuantumEvolutionaryOptimizer::run_evolution,
