@@ -212,8 +212,8 @@ def main():
     cpp_evolver = OptimizedQuantumEvolver(
         num_qubits=num_qubits,
         target_circuit=target_circuit,
-        population_size=50,
-        generations=100,
+        population_size=200,
+        generations=500,
         crossover_rate=0.85,
         mutation_rate=0.85,
         offspring_rate=0.3,
@@ -237,6 +237,7 @@ def main():
     print("RESULTS")
     print("="*50)
     
+    cpp_evolver.print_circuit_info(target_circuit, "Target Circuit")
     cpp_evolver.print_circuit_info(best_circuit, "Best Circuit")
     
     # Calculate final fidelity
