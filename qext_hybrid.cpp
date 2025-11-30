@@ -15,7 +15,11 @@
 #include <numeric>
 #include <string>
 #include <utility>
-#include <omp.h>  // OpenMP header
+#ifdef _OPENMP
+#include <omp.h>
+#else
+#define omp_get_thread_num() 0
+#endif // _OPENMP
 
 namespace py = pybind11;
 using Complex = std::complex<double>;
@@ -431,10 +435,9 @@ private:
 public:
     RandomGenerator() : real_dist(0.0, 1.0) {
         // Initialize thread-local generator if not already initialized
-        static std::atomic<bool> initialized(false);
-        if (!initialized.exchange(true)) {
+        if (gen == std::mt19937{}) {
             std::random_device rd;
-            gen.seed(rd());
+            gen.seed(rd() + omp_get_thread_num() * 1000); // Different seed per thread
         }
     }
     
@@ -484,6 +487,7 @@ public:
 
 // Initialize thread-local random generator
 thread_local std::mt19937 RandomGenerator::gen;
+static thread_local RandomGenerator rng;
 
 // Enhanced QuantumEvolutionaryOptimizer with hybrid optimization
 class QuantumEvolutionaryOptimizer {
@@ -506,7 +510,6 @@ private:
     std::shared_ptr<CircuitIndividual> best_individual;
     std::vector<double> fitness_history;
     
-    RandomGenerator rng;
     MatrixXcd target_unitary;  // Store target unitary
     
     std::function<double(const CircuitIndividual&)> fitness_func;
@@ -927,7 +930,7 @@ PYBIND11_MODULE(qext, m) {
         .def("optimize_parameters", &QuantumEvolutionaryOptimizer::optimize_parameters)
         .def("apply_parameter_optimization", &QuantumEvolutionaryOptimizer::apply_parameter_optimization)
         .def("create_random_circuit", &QuantumEvolutionaryOptimizer::create_random_circuit)
-        .def("run_evolution", &QuantumEvolutionaryOptimizer::run_evolution,
+        .def("run_evolution", &QuantumEvolutionaryOptimizer::run_evolution, py::call_guard<py::gil_scoped_release>(),
              py::arg("from_scratch") = true, py::arg("selection_method") = "tournament")
         .def("get_population", &QuantumEvolutionaryOptimizer::get_population)
         .def("get_fitness_history", &QuantumEvolutionaryOptimizer::get_fitness_history)

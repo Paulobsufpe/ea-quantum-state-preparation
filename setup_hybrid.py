@@ -36,6 +36,15 @@ ext_modules = [
         extra_compile_args=['-O3', '-march=native', '-ffast-math', '-g'],
         extra_link_args=['-O3', '-march=native', '-ffast-math', '-g'],
     ),
+    Pybind11Extension(
+        "qext_omp",
+        ["qext_hybrid.cpp"],
+        include_dirs=include_dirs,
+        language='c++',
+        cxx_std=17,
+        extra_compile_args=['-O3', '-march=native', '-ffast-math', '-g', '-fopenmp'],
+        extra_link_args=['-O3', '-march=native', '-ffast-math', '-g', '-fopenmp'],
+    ),
 ]
 
 setup(
