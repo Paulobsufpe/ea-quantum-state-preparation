@@ -212,8 +212,8 @@ def main():
     cpp_evolver = OptimizedQuantumEvolver(
         num_qubits=num_qubits,
         target_circuit=target_circuit,
-        population_size=200,
-        generations=500,
+        population_size=50,
+        generations=100,
         crossover_rate=0.85,
         mutation_rate=0.85,
         offspring_rate=0.3,
@@ -246,7 +246,7 @@ def main():
     
     # Print population statistics
     stats = cpp_evolver.get_population_stats()
-    print(f"\nFinal population statistics:")
+    print("\nFinal population statistics:")
     print(f"  Average fitness: {stats['avg_fitness']:.4f}")
     print(f"  Best fitness: {stats['max_fitness']:.4f}")
     print(f"  Average depth: {stats['avg_depth']:.2f}")

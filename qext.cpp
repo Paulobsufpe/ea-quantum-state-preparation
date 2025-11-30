@@ -734,7 +734,7 @@ public:
     }
     
     // Main evolution loop
-    CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "tournament") {
+    CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "roulette") {
         initialize_population(target_depth, !from_scratch);
         
         // Evaluate initial population
