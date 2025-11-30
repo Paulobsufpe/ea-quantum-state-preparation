@@ -307,8 +307,8 @@ def create_comparison_optimizer():
     return VisualQuantumOptimizer(
         num_qubits=3,
         target_depth=12,
-        population_size=200,
-        generations=500,
+        population_size=1000,
+        generations=2000,
         use_hybrid=True
     )
 
