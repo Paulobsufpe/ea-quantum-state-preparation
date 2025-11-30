@@ -201,7 +201,7 @@ class VisualQuantumOptimizer:
             self.visualize_circuit(self.target_circuit, "TARGET CIRCUIT", show_unitary=True)
         
         # Run optimization
-        self.best_circuit = self.optimizer.run_evolution(from_scratch=True)
+        self.best_circuit = self.optimizer.run_evolution(from_scratch=True, selection_method="roulette")
         optimization_time = time.time() - start_time
         
         # Collect optimization statistics

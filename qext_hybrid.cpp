@@ -15,6 +15,7 @@
 #include <numeric>
 #include <string>
 #include <utility>
+#include <omp.h>  // OpenMP header
 
 namespace py = pybind11;
 using Complex = std::complex<double>;
@@ -420,17 +421,27 @@ double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& targ
     }
 }
 
-// Random number generator
+// Thread-safe random number generator
 class RandomGenerator {
 private:
-    std::mt19937 gen;
+    // Thread-local storage for random generators
+    static thread_local std::mt19937 gen;
     std::uniform_real_distribution<double> real_dist;
     
 public:
-    RandomGenerator() : gen(std::random_device{}()), real_dist(0.0, 1.0) {}
+    RandomGenerator() : real_dist(0.0, 1.0) {
+        // Initialize thread-local generator if not already initialized
+        static std::atomic<bool> initialized(false);
+        if (!initialized.exchange(true)) {
+            std::random_device rd;
+            gen.seed(rd());
+        }
+    }
     
     // Seed constructor for thread safety
-    RandomGenerator(int seed) : gen(seed), real_dist(0.0, 1.0) {}
+    RandomGenerator(int seed) : real_dist(0.0, 1.0) {
+        gen.seed(seed);
+    }
     
     double random_double(double min = 0.0, double max = 1.0) {
         return min + (max - min) * real_dist(gen);
@@ -470,6 +481,9 @@ public:
         return result;
     }
 };
+
+// Initialize thread-local random generator
+thread_local std::mt19937 RandomGenerator::gen;
 
 // Enhanced QuantumEvolutionaryOptimizer with hybrid optimization
 class QuantumEvolutionaryOptimizer {
@@ -555,11 +569,13 @@ public:
         int num_to_optimize = std::max(1, static_cast<int>(population_size * param_optimization_rate));
         auto candidates = rng.random_sample(population, num_to_optimize);
         
-        for (auto& individual : candidates) {
-            optimize_parameters(individual);
+        // Parallel parameter optimization with OpenMP
+        #pragma omp parallel for
+        for (size_t i = 0; i < candidates.size(); ++i) {
+            optimize_parameters(candidates[i]);
             // Update fitness after parameter optimization
             if (fitness_func) {
-                individual.fitness = fitness_func(individual);
+                candidates[i].fitness = fitness_func(candidates[i]);
             }
         }
     }
@@ -642,6 +658,68 @@ public:
         return {best1, best2};
     }
     
+    // Roulette wheel selection
+    std::pair<CircuitIndividual, CircuitIndividual> roulette_selection() {
+        // Calculate total fitness
+        double total_fitness = 0.0;
+        for (const auto& individual : population) {
+            total_fitness += individual.fitness;
+        }
+        
+        if (total_fitness <= 0.0) {
+            // Fall back to tournament selection if all fitness values are non-positive
+            return tournament_selection();
+        }
+        
+        // Calculate selection probabilities
+        std::vector<double> probabilities;
+        probabilities.reserve(population.size());
+        for (const auto& individual : population) {
+            probabilities.push_back(individual.fitness / total_fitness);
+        }
+        
+        // Select first parent
+        double rand1 = rng.random_double(0.0, 1.0);
+        double cumulative_prob = 0.0;
+        CircuitIndividual parent1 = population[0]; // fallback
+        
+        for (size_t i = 0; i < population.size(); ++i) {
+            cumulative_prob += probabilities[i];
+            if (rand1 <= cumulative_prob) {
+                parent1 = population[i];
+                break;
+            }
+        }
+        
+        // Select second parent (ensure different from first)
+        CircuitIndividual parent2 = parent1;
+        int attempts = 0;
+        while (parent2.fitness == parent1.fitness && attempts < 10) {
+            double rand2 = rng.random_double(0.0, 1.0);
+            cumulative_prob = 0.0;
+            
+            for (size_t i = 0; i < population.size(); ++i) {
+                cumulative_prob += probabilities[i];
+                if (rand2 <= cumulative_prob) {
+                    parent2 = population[i];
+                    break;
+                }
+            }
+            attempts++;
+        }
+        
+        return {parent1, parent2};
+    }
+    
+    // Selection method dispatcher
+    std::pair<CircuitIndividual, CircuitIndividual> select_parents(const std::string& method) {
+        if (method == "roulette") {
+            return roulette_selection();
+        } else { // Default to tournament
+            return tournament_selection();
+        }
+    }
+    
     // Simple uniform crossover
     CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2) {
         if (rng.random_double() > crossover_rate || parent1.layers.empty() || parent2.layers.empty()) {
@@ -695,7 +773,8 @@ public:
     void evaluate_population_fitness(std::vector<CircuitIndividual>& individuals) {
         if (!fitness_func) return;
         
-        // Sequential evaluation - safe and reliable
+        // Parallel evaluation with OpenMP - safe and reliable
+        #pragma omp parallel for
         for (size_t i = 0; i < individuals.size(); ++i) {
             individuals[i].fitness = fitness_func(individuals[i]);
         }
@@ -717,10 +796,11 @@ public:
                 apply_parameter_optimization();
             }
             
-            // Create offspring
-            std::vector<CircuitIndividual> offspring;
+            // Create offspring in parallel with OpenMP
+            std::vector<CircuitIndividual> offspring(num_offspring);
+            #pragma omp parallel for
             for (int i = 0; i < num_offspring; ++i) {
-                auto parents = tournament_selection();
+                auto parents = select_parents(selection_method);
                 auto child = crossover(parents.first, parents.second);
                 child = mutate(std::move(child));
                 child = child.optimize_structure();
@@ -728,7 +808,7 @@ public:
                 if (fitness_func) {
                     child.fitness = fitness_func(child);
                 }
-                offspring.push_back(std::move(child));
+                offspring[i] = std::move(child);
             }
             
             // Replace worst individuals
@@ -760,11 +840,13 @@ public:
                     fitness_history.push_back(best_it->fitness);
                     
                     // Log every 50 generations
+                    #pragma omp single
                     if (generation % 50 == 0) {
                         int non_id_gates = best_it->count_non_id_gates();
                         std::cout << "Generation " << generation << ": Best fitness = " << best_it->fitness
                                  << ", Depth = " << best_it->depth 
-                                 << ", Non-ID gates = " << non_id_gates << std::endl;
+                                 << ", Non-ID gates = " << non_id_gates 
+                                 << ", Selection = " << selection_method << std::endl;
                     }
                 }
             }
@@ -794,7 +876,7 @@ public:
 
 // Pybind11 module
 PYBIND11_MODULE(qext, m) {
-    m.doc() = "High-performance hybrid quantum circuit optimization with COBYLA";
+    m.doc() = "High-performance hybrid quantum circuit optimization with COBYLA and OpenMP";
     
     // GateType enum
     py::enum_<GateType>(m, "GateType")
