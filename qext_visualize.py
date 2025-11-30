@@ -12,13 +12,24 @@ except ImportError:
     HAS_QISKIT = False
     print("Warning: Qiskit not available. Circuit visualization disabled.")
 
-try:
-    from qext import Gate, GateType, CircuitIndividual, QuantumEvolutionaryOptimizer
-    from qext import calculate_fidelity, calculate_fitness, identity_matrix
-    HAS_EXT = True
-except ImportError as e:
-    print(f"C++ extension not available: {e}")
-    HAS_EXT = False
+import sys
+if (len(sys.argv) > 1 and sys.argv[1] == "omp"):
+    try:
+        from qext_omp import Gate, GateType, CircuitIndividual, QuantumEvolutionaryOptimizer
+        from qext_omp import calculate_fidelity, calculate_fitness, identity_matrix
+        HAS_EXT = True
+    except ImportError as e:
+        print(f"C++ extension not available: {e}")
+        HAS_EXT = False
+else:
+    try:
+        from qext import Gate, GateType, CircuitIndividual, QuantumEvolutionaryOptimizer
+        from qext import calculate_fidelity, calculate_fitness, identity_matrix
+        HAS_EXT = True
+    except ImportError as e:
+        print(f"C++ extension not available: {e}")
+        HAS_EXT = False
+    pass
 
 class VisualQuantumOptimizer:
     """

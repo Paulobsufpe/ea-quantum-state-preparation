@@ -17,8 +17,10 @@
 #include <utility>
 #ifdef _OPENMP
 #include <omp.h>
+#define ModuleName qext_omp
 #else
 #define omp_get_thread_num() 0
+#define ModuleName qext
 #endif // _OPENMP
 
 namespace py = pybind11;
@@ -878,7 +880,7 @@ public:
 };
 
 // Pybind11 module
-PYBIND11_MODULE(qext, m) {
+PYBIND11_MODULE(ModuleName, m) {
     m.doc() = "High-performance hybrid quantum circuit optimization with COBYLA and OpenMP";
     
     // GateType enum
