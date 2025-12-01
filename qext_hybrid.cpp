@@ -30,7 +30,7 @@ using VectorXcd = Eigen::Vector<Complex, Eigen::Dynamic>;
 
 // COBYLA implementation for parameter optimization
 namespace cobyla {
-    
+
 class COBYLA {
 private:
     std::function<double(const std::vector<double>&)> objective_;
@@ -179,9 +179,9 @@ public:
     }
     
     // Get available qubits
-    inline std::vector<int> get_available_qubits(const std::vector<bool>& used) const {
+    static inline std::vector<int> get_available_qubits(const std::vector<bool>& used) {
         std::vector<int> available;
-        for (int q = 0; q < num_qubits; ++q) {
+        for (size_t q = 0; q < used.size(); ++q) {
             if (!used[q]) available.push_back(q);
         }
         return available;
@@ -480,6 +480,17 @@ public:
     }
 };
 
+// Crossover types
+enum class CrossoverType {
+    SINGLE_POINT, UNIFORM, MULTI_POINT, BLOCKWISE
+};
+
+// Mutation types
+enum class MutationType {
+    SINGLE_GATE, GATE_SWAP, COLUMN_SWAP, CTRL_TARGET_SWAP,
+    ADD_RANDOM_COLUMN, DELETE_COLUMN, ADD_CX_GATE, ADD_SINGLE_GATE, MUTATE_PARAMETERS
+};
+
 // Initialize thread-local random generator
 thread_local std::mt19937 RandomGenerator::gen;
 thread_local RandomGenerator rng;
@@ -509,13 +520,242 @@ private:
     
     std::function<double(const CircuitIndividual&)> fitness_func;
     
-    // Helper function to get available qubits
-    static inline std::vector<int> get_available_qubits(const std::vector<bool>& used) {
-        std::vector<int> available;
-        for (int i = 0; i < static_cast<int>(used.size()); ++i) {
-            if (!used[i]) available.push_back(i);
+    static inline CircuitIndividual crossover_single_point(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        int child_depth = std::max(p1.depth, p2.depth);
+        if (child_depth <= 1) return p1;
+        
+        int crossover_point = rng.random_int(1, child_depth - 1);
+        
+        std::vector<std::vector<Gate>> child_layers;
+        for (int i = 0; i < child_depth; ++i) {
+            if (i < crossover_point) {
+                child_layers.push_back(i < static_cast<int>(p1.layers.size()) ? p1.layers[i] : std::vector<Gate>());
+            } else {
+                child_layers.push_back(i < static_cast<int>(p2.layers.size()) ? p2.layers[i] : std::vector<Gate>());
+            }
         }
-        return available;
+        
+        return CircuitIndividual(p1.num_qubits, child_depth, std::move(child_layers));
+    }
+
+    static inline CircuitIndividual crossover_uniform(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        const int child_depth = std::max(p1.depth, p2.depth);
+        
+        std::vector<std::vector<Gate>> child_layers;
+        for (int i = 0; i < child_depth; ++i) {
+            if (rng.random_bool()) {
+                child_layers.push_back(i < static_cast<int>(p1.layers.size()) ? p1.layers[i] : std::vector<Gate>());
+            } else {
+                child_layers.push_back(i < static_cast<int>(p2.layers.size()) ? p2.layers[i] : std::vector<Gate>());
+            }
+        }
+        
+        return CircuitIndividual(p1.num_qubits, child_depth, std::move(child_layers));
+    }
+    
+    static inline CircuitIndividual crossover_multi_point(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        int child_depth = std::max(p1.depth, p2.depth);
+        int num_points = rng.random_int(2, std::min(5, child_depth));
+        
+        std::vector<int> points = {0, child_depth};
+        for (int i = 0; i < num_points - 2; ++i) {
+            points.push_back(rng.random_int(1, child_depth - 1));
+        }
+        std::sort(points.begin(), points.end());
+        
+        std::vector<std::vector<Gate>> child_layers;
+        bool use_p1 = true;
+        
+        for (size_t i = 0; i < points.size() - 1; ++i) {
+            int start = points[i], end = points[i + 1];
+            const auto& parent = use_p1 ? p1 : p2;
+            
+            for (int j = start; j < end; ++j) {
+                if (j < static_cast<int>(parent.layers.size())) {
+                    child_layers.push_back(parent.layers[j]);
+                } else {
+                    child_layers.emplace_back();
+                }
+            }
+            use_p1 = !use_p1;
+        }
+        
+        return CircuitIndividual(p1.num_qubits, child_depth, std::move(child_layers));
+    }
+    
+    static inline CircuitIndividual crossover_blockwise(const CircuitIndividual& p1, const CircuitIndividual& p2) {
+        int child_depth = std::max(p1.depth, p2.depth);
+        if (child_depth <= 0 || p1.num_qubits <= 1) return p1;
+        
+        int depth_split = rng.random_int(1, child_depth - 1);
+        int qubit_split = rng.random_int(1, p1.num_qubits - 1);
+        
+        std::vector<std::vector<Gate>> child_layers;
+        for (int i = 0; i < child_depth; ++i) {
+            std::vector<Gate> layer_gates;
+            const auto& parent = (i < depth_split) ? p1 : p2;
+            
+            if (i < static_cast<int>(parent.layers.size())) {
+                for (const auto& gate : parent.layers[i]) {
+                    bool all_match = true;
+                    for (int q : gate.qubits) {
+                        if ((i < depth_split && q >= qubit_split) ||
+                            (i >= depth_split && q < qubit_split)) {
+                            all_match = false;
+                            break;
+                        }
+                    }
+                    if (all_match) {
+                        layer_gates.push_back(gate);
+                    }
+                }
+            }
+            child_layers.push_back(std::move(layer_gates));
+        }
+        
+        return CircuitIndividual(p1.num_qubits, child_depth, std::move(child_layers));
+    }
+
+    inline CircuitIndividual mutate_single_gate(CircuitIndividual ind) const {
+        if (ind.layers.empty()) return ind;
+        
+        int layer_idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
+        if (ind.layers[layer_idx].empty()) return ind;
+        
+        int gate_idx = rng.random_int(0, static_cast<int>(ind.layers[layer_idx].size()) - 1);
+        GateType new_type = rng.random_choice(gate_set);
+        const auto& old_gate = ind.layers[layer_idx][gate_idx];
+        
+        if (new_type == GateType::CX && !old_gate.qubits.empty()) {
+            auto used = ind.get_used_qubits(layer_idx);
+            auto available = ind.get_available_qubits(used);
+            if (available.size() >= 1) {
+                std::vector<int> new_qubits = {old_gate.qubits[0], rng.random_choice(available)};
+                ind.layers[layer_idx][gate_idx] = Gate(GateType::CX, new_qubits);
+            }
+        } else if (new_type == GateType::RZ) {
+            double angle = rng.random_double(0.0, 2.0 * M_PI);
+            std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
+                                     std::vector<int>{old_gate.qubits[0]};
+            ind.layers[layer_idx][gate_idx] = Gate(GateType::RZ, qubits, angle);
+        } else {
+            std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
+                                     std::vector<int>{old_gate.qubits[0]};
+            ind.layers[layer_idx][gate_idx] = Gate(new_type, qubits);
+        }
+        
+        return ind;
+    }
+    
+    static inline CircuitIndividual mutate_gate_swap(CircuitIndividual ind) {
+        if (ind.layers.size() < 2) return ind;
+        
+        std::vector<int> indices(ind.layers.size());
+        std::iota(indices.begin(), indices.end(), 0);
+        auto layers_idx = rng.random_sample(indices, 2);
+        int layer1 = layers_idx[0], layer2 = layers_idx[1];
+        
+        if (!ind.layers[layer1].empty() && !ind.layers[layer2].empty()) {
+            int gate1 = rng.random_int(0, static_cast<int>(ind.layers[layer1].size()) - 1);
+            int gate2 = rng.random_int(0, static_cast<int>(ind.layers[layer2].size()) - 1);
+            std::swap(ind.layers[layer1][gate1], ind.layers[layer2][gate2]);
+        }
+        
+        return ind;
+    }
+    
+    static inline CircuitIndividual mutate_column_swap(CircuitIndividual ind) {
+        if (ind.layers.size() >= 2) {
+            std::vector<int> indices(ind.layers.size());
+            std::iota(indices.begin(), indices.end(), 0);
+            auto selected = rng.random_sample(indices, 2);
+            std::swap(ind.layers[selected[0]], ind.layers[selected[1]]);
+        }
+        return ind;
+    }
+    
+    static inline CircuitIndividual mutate_ctrl_target_swap(CircuitIndividual ind) {
+        for (auto& layer : ind.layers) {
+            for (auto& gate : layer) {
+                if (gate.type == GateType::CX && gate.qubits.size() == 2) {
+                    std::swap(gate.qubits[0], gate.qubits[1]);
+                }
+            }
+        }
+        return ind;
+    }
+    
+    inline CircuitIndividual mutate_add_random_column(CircuitIndividual ind) const {
+        auto new_circuit = create_random_circuit(1);
+        if (!new_circuit.layers.empty()) {
+            ind.layers.push_back(new_circuit.layers[0]);
+            ind.depth = static_cast<int>(ind.layers.size());
+        }
+        return ind;
+    }
+    
+    static inline CircuitIndividual mutate_delete_column(CircuitIndividual ind) {
+        if (ind.depth > 1) {
+            int idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
+            ind.layers.erase(ind.layers.begin() + idx);
+            ind.depth = static_cast<int>(ind.layers.size());
+        }
+        return ind;
+    }
+    
+    static inline CircuitIndividual mutate_add_cx_gate(CircuitIndividual ind) {
+        if (!ind.layers.empty()) {
+            int layer_idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
+            auto used = ind.get_used_qubits(layer_idx);
+            auto available = ind.get_available_qubits(used);
+            
+            if (available.size() >= 2) {
+                auto qubit_pair = rng.random_sample(available, 2);
+                ind.layers[layer_idx].emplace_back(GateType::CX, qubit_pair);
+            }
+        }
+        return ind;
+    }
+    
+    inline CircuitIndividual mutate_add_single_gate(CircuitIndividual ind) const {
+        if (!ind.layers.empty()) {
+            int layer_idx = rng.random_int(0, static_cast<int>(ind.layers.size()) - 1);
+            auto used = ind.get_used_qubits(layer_idx);
+            auto available = ind.get_available_qubits(used);
+            
+            if (!available.empty()) {
+                std::vector<GateType> single_qubit_gates;
+                for (auto gt : gate_set) {
+                    if (gt != GateType::CX) single_qubit_gates.push_back(gt);
+                }
+                
+                if (!single_qubit_gates.empty()) {
+                    GateType gate_type = rng.random_choice(single_qubit_gates);
+                    int qubit = rng.random_choice(available);
+                    
+                    if (gate_type == GateType::RZ) {
+                        double angle = rng.random_double(0.0, 2.0 * M_PI);
+                        ind.layers[layer_idx].emplace_back(GateType::RZ, std::vector<int>{qubit}, angle);
+                    } else {
+                        ind.layers[layer_idx].emplace_back(gate_type, std::vector<int>{qubit});
+                    }
+                }
+            }
+        }
+        return ind;
+    }
+    
+    static inline CircuitIndividual mutate_parameters(CircuitIndividual ind) {
+        for (auto& layer : ind.layers) {
+            for (auto& gate : layer) {
+                if (gate.type == GateType::RZ) {
+                    gate.angle += rng.random_double(-0.1, 0.1);
+                    gate.angle = std::fmod(gate.angle, 2.0 * M_PI);
+                    if (gate.angle < 0) gate.angle += 2.0 * M_PI;
+                }
+            }
+        }
+        return ind;
     }
     
 public:
@@ -589,7 +829,7 @@ public:
             // Try to add some gates to this layer
             int attempts = 0;
             while (attempts < num_qubits * 2) {
-                auto available = get_available_qubits(used);
+                auto available = CircuitIndividual::get_available_qubits(used);
                 if (available.empty()) break;
                 
                 GateType gate_type = rng.random_choice(gate_set);
@@ -718,54 +958,64 @@ public:
         }
     }
     
-    // Simple uniform crossover
-    inline CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2) const {
+    // Crossover operations
+    CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2,
+                               CrossoverType method = CrossoverType::UNIFORM) {
         if (rng.random_double() > crossover_rate || parent1.layers.empty() || parent2.layers.empty()) {
             return rng.random_bool() ? parent1 : parent2;
         }
         
-        const int child_depth = std::max(parent1.depth, parent2.depth);
-        std::vector<std::vector<Gate>> child_layers;
-        
-        for (int i = 0; i < child_depth; ++i) {
-            if (rng.random_bool()) {
-                child_layers.push_back(i < static_cast<int>(parent1.layers.size()) ? 
-                                      parent1.layers[i] : std::vector<Gate>());
-            } else {
-                child_layers.push_back(i < static_cast<int>(parent2.layers.size()) ? 
-                                      parent2.layers[i] : std::vector<Gate>());
-            }
+        switch (method) {
+            case CrossoverType::SINGLE_POINT:
+                return crossover_single_point(parent1, parent2);
+            case CrossoverType::UNIFORM:
+                return crossover_uniform(parent1, parent2);
+            case CrossoverType::MULTI_POINT:
+                return crossover_multi_point(parent1, parent2);
+            case CrossoverType::BLOCKWISE:
+                return crossover_blockwise(parent1, parent2);
+            default:
+                return parent1;
         }
-        
-        return CircuitIndividual(parent1.num_qubits, child_depth, std::move(child_layers));
     }
     
-    // Simple mutation
-    inline CircuitIndividual mutate(CircuitIndividual individual) const {
-        if (rng.random_double() > mutation_rate || individual.layers.empty()) {
+    // Mutation operations
+    inline CircuitIndividual mutate(CircuitIndividual individual) {
+        if (rng.random_double() > mutation_rate) {
             return individual;
         }
         
-        // Simple gate mutation
-        int layer_idx = rng.random_int(0, static_cast<int>(individual.layers.size()) - 1);
-        if (!individual.layers[layer_idx].empty()) {
-            int gate_idx = rng.random_int(0, static_cast<int>(individual.layers[layer_idx].size()) - 1);
-            GateType new_type = rng.random_choice(gate_set);
-            const auto& old_gate = individual.layers[layer_idx][gate_idx];
-            
-            if (new_type == GateType::RZ) {
-                double angle = rng.random_double(0.0, 2.0 * M_PI);
-                std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
-                                         std::vector<int>{old_gate.qubits[0]};
-                individual.layers[layer_idx][gate_idx] = Gate(GateType::RZ, qubits, angle);
-            } else {
-                std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
-                                         std::vector<int>{old_gate.qubits[0]};
-                individual.layers[layer_idx][gate_idx] = Gate(new_type, qubits);
-            }
-        }
+        const static std::vector<MutationType> mutation_types = {
+            MutationType::SINGLE_GATE, MutationType::GATE_SWAP, MutationType::COLUMN_SWAP,
+            MutationType::CTRL_TARGET_SWAP, MutationType::ADD_RANDOM_COLUMN,
+            MutationType::DELETE_COLUMN, MutationType::ADD_CX_GATE,
+            MutationType::ADD_SINGLE_GATE, MutationType::MUTATE_PARAMETERS
+        };
         
-        return individual;
+        const MutationType mutation_type = rng.random_choice(mutation_types);
+        
+        switch (mutation_type) {
+            case MutationType::SINGLE_GATE:
+                return mutate_single_gate(std::move(individual));
+            case MutationType::GATE_SWAP:
+                return mutate_gate_swap(std::move(individual));
+            case MutationType::COLUMN_SWAP:
+                return mutate_column_swap(std::move(individual));
+            case MutationType::CTRL_TARGET_SWAP:
+                return mutate_ctrl_target_swap(std::move(individual));
+            case MutationType::ADD_RANDOM_COLUMN:
+                return mutate_add_random_column(std::move(individual));
+            case MutationType::DELETE_COLUMN:
+                return mutate_delete_column(std::move(individual));
+            case MutationType::ADD_CX_GATE:
+                return mutate_add_cx_gate(std::move(individual));
+            case MutationType::ADD_SINGLE_GATE:
+                return mutate_add_single_gate(std::move(individual));
+            case MutationType::MUTATE_PARAMETERS:
+                return mutate_parameters(std::move(individual));
+            default:
+                return individual;
+        }
     }
     
     inline void evaluate_population_fitness(std::vector<CircuitIndividual>& individuals) const {
