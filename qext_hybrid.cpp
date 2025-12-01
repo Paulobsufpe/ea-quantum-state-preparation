@@ -1037,6 +1037,7 @@ public:
         
         const int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
         const int num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
+        std::vector<CircuitIndividual> offspring(num_offspring);
         
         for (int generation = 0; generation < generations; ++generation) {
             // Apply parameter optimization every N generations
@@ -1045,7 +1046,6 @@ public:
             }
             
             // Create offspring in parallel with OpenMP
-            std::vector<CircuitIndividual> offspring(num_offspring);
             #pragma omp parallel for
             for (int i = 0; i < num_offspring; ++i) {
                 auto parents = select_parents(selection_method);
