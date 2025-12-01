@@ -5,6 +5,7 @@
 #include <pybind11/eigen.h>
 
 #include <Eigen/Dense>
+#include <Eigen/Sparse>  // Add sparse header
 #include <vector>
 #include <random>
 #include <algorithm>
@@ -25,6 +26,12 @@
 
 namespace py = pybind11;
 using Complex = std::complex<double>;
+
+// Change from dense to sparse types
+using SparseMatrixXcd = Eigen::SparseMatrix<Complex, Eigen::RowMajor>; // Row-major for better cache locality
+using SparseVectorXcd = Eigen::SparseVector<Complex>;
+
+// Keep dense types for small matrices if needed
 using MatrixXcd = Eigen::Matrix<Complex, Eigen::Dynamic, Eigen::Dynamic>;
 using VectorXcd = Eigen::Vector<Complex, Eigen::Dynamic>;
 
@@ -261,65 +268,96 @@ public:
         return CircuitIndividual(num_qubits, static_cast<int>(new_layers.size()), std::move(new_layers));
     }
     
-    // Convert circuit to unitary matrix using Eigen
-    inline MatrixXcd circuit_to_unitary() const {
+    // Convert circuit to unitary matrix using Eigen - NOW USING SPARSE MATRICES
+    inline SparseMatrixXcd circuit_to_unitary() const {
         int dim = 1 << num_qubits; // 2^n
-        MatrixXcd unitary = MatrixXcd::Identity(dim, dim);
+        SparseMatrixXcd unitary(dim, dim);
+        std::vector<Eigen::Triplet<Complex>> triplets;
+        triplets.reserve(dim); // Identity matrix has dim non-zero elements
+        
+        // Initialize with identity matrix
+        for (int i = 0; i < dim; ++i) {
+            triplets.emplace_back(i, i, Complex(1.0, 0.0));
+        }
+        unitary.setFromTriplets(triplets.begin(), triplets.end());
         
         for (const auto& layer : layers) {
-            MatrixXcd layer_matrix = MatrixXcd::Identity(dim, dim);
+            SparseMatrixXcd layer_matrix(dim, dim);
+            std::vector<Eigen::Triplet<Complex>> layer_triplets;
+            layer_triplets.reserve(dim); // Start with identity
+            
+            // Build layer matrix by applying gates
+            SparseMatrixXcd temp_unitary = unitary;
             
             for (const auto& gate : layer) {
                 if (gate.type == GateType::ID) continue;
                 
-                MatrixXcd gate_matrix = get_gate_matrix(gate, num_qubits);
-                layer_matrix = gate_matrix * layer_matrix;
+                SparseMatrixXcd gate_matrix = get_gate_matrix(gate, num_qubits);
+                // Sparse matrix multiplication
+                temp_unitary = gate_matrix * temp_unitary;
             }
             
-            unitary = layer_matrix * unitary;
+            unitary = temp_unitary;
         }
         
+        // Make sure matrix is compressed
+        unitary.makeCompressed();
         return unitary;
     }
     
+    // Convert sparse to dense (for small systems if needed)
+    inline MatrixXcd circuit_to_unitary_dense() const {
+        return MatrixXcd(circuit_to_unitary());
+    }
+    
 private:
-    static inline MatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) {
-        int dim = 1 << total_qubits;
+    static inline constexpr SparseMatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) {
+        const int dim = 1 << total_qubits;
         
         switch (gate.type) {
             case GateType::X:
-                return get_pauli_x_matrix(gate.qubits[0], total_qubits);
+                return get_pauli_x_matrix(gate.qubits[0], dim);
             case GateType::SX:
-                return get_sx_matrix(gate.qubits[0], total_qubits);
+                return get_sx_matrix(gate.qubits[0], dim);
             case GateType::RZ:
-                return get_rz_matrix(gate.angle, gate.qubits[0], total_qubits);
+                return get_rz_matrix(gate.angle, gate.qubits[0], dim);
             case GateType::H:
-                return get_hadamard_matrix(gate.qubits[0], total_qubits);
+                return get_hadamard_matrix(gate.qubits[0], dim);
             case GateType::CX:
                 if (gate.qubits.size() >= 2) {
-                    return get_cx_matrix(gate.qubits[0], gate.qubits[1], total_qubits);
+                    return get_cx_matrix(gate.qubits[0], gate.qubits[1], dim);
                 }
                 // Fallthrough
             default:
-                return MatrixXcd::Identity(dim, dim);
+                return get_identity_matrix(dim);
         }
     }
     
-    static inline MatrixXcd get_pauli_x_matrix(int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
-        MatrixXcd result = MatrixXcd::Zero(dim, dim);
+    // Helper to create sparse identity matrix
+    static inline constexpr SparseMatrixXcd get_identity_matrix(int dim) {
+        SparseMatrixXcd identity(dim, dim);
+        identity.setIdentity();
+        return identity;
+    }
+    
+    static inline constexpr SparseMatrixXcd get_pauli_x_matrix(int target_qubit, int dim) {
+        std::vector<Eigen::Triplet<Complex>> triplets;
+        triplets.reserve(dim); // X gate permutes all basis states
         
         for (int i = 0; i < dim; ++i) {
             int flipped = i ^ (1 << target_qubit);
-            result(flipped, i) = 1.0;
+            triplets.emplace_back(flipped, i, Complex(1.0, 0.0));
         }
         
+        SparseMatrixXcd result(dim, dim);
+        result.setFromTriplets(triplets.begin(), triplets.end());
         return result;
     }
     
-    static inline MatrixXcd get_sx_matrix(int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
-        MatrixXcd result = MatrixXcd::Zero(dim, dim);
+    static inline constexpr SparseMatrixXcd get_sx_matrix(int target_qubit, int dim) {
+        std::vector<Eigen::Triplet<Complex>> triplets;
+        triplets.reserve(2 * dim); // Each basis state has 2 non-zero entries
+        
         Complex half_plus_half_i = Complex(0.5, 0.5);
         Complex half_minus_half_i = Complex(0.5, -0.5);
         
@@ -329,38 +367,41 @@ private:
             
             if (i == basis_with_zero) {
                 // |0⟩ component
-                result(basis_with_zero, i) = half_plus_half_i;
-                result(basis_with_one, i) = half_minus_half_i;
+                triplets.emplace_back(basis_with_zero, i, half_plus_half_i);
+                triplets.emplace_back(basis_with_one, i, half_minus_half_i);
             } else {
                 // |1⟩ component
-                result(basis_with_zero, i) = half_minus_half_i;
-                result(basis_with_one, i) = half_plus_half_i;
+                triplets.emplace_back(basis_with_zero, i, half_minus_half_i);
+                triplets.emplace_back(basis_with_one, i, half_plus_half_i);
             }
         }
         
+        SparseMatrixXcd result(dim, dim);
+        result.setFromTriplets(triplets.begin(), triplets.end());
         return result;
     }
     
-    static inline MatrixXcd get_rz_matrix(double angle, int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
-        MatrixXcd result = MatrixXcd::Zero(dim, dim);
+    static inline constexpr SparseMatrixXcd get_rz_matrix(double angle, int target_qubit, int dim) {
+        std::vector<Eigen::Triplet<Complex>> triplets;
+        triplets.reserve(dim); // RZ is diagonal
+        
         Complex phase0 = std::exp(Complex(0, -angle/2));
         Complex phase1 = std::exp(Complex(0, angle/2));
         
         for (int i = 0; i < dim; ++i) {
-            if (i & (1 << target_qubit)) {
-                result(i, i) = phase1;
-            } else {
-                result(i, i) = phase0;
-            }
+            Complex phase = (i & (1 << target_qubit)) ? phase1 : phase0;
+            triplets.emplace_back(i, i, phase);
         }
         
+        SparseMatrixXcd result(dim, dim);
+        result.setFromTriplets(triplets.begin(), triplets.end());
         return result;
     }
     
-    static inline MatrixXcd get_hadamard_matrix(int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
-        MatrixXcd result = MatrixXcd::Zero(dim, dim);
+    static inline constexpr SparseMatrixXcd get_hadamard_matrix(int target_qubit, int dim) {
+        std::vector<Eigen::Triplet<Complex>> triplets;
+        triplets.reserve(2 * dim); // Hadamard has 2 non-zeros per column
+        
         double inv_sqrt2 = 1.0 / std::sqrt(2.0);
         
         for (int i = 0; i < dim; ++i) {
@@ -368,51 +409,66 @@ private:
             int basis_with_one = i | (1 << target_qubit);
             
             if (i == basis_with_zero) {
-                result(basis_with_zero, i) = inv_sqrt2;
-                result(basis_with_one, i) = inv_sqrt2;
+                triplets.emplace_back(basis_with_zero, i, inv_sqrt2);
+                triplets.emplace_back(basis_with_one, i, inv_sqrt2);
             } else {
-                result(basis_with_zero, i) = inv_sqrt2;
-                result(basis_with_one, i) = -inv_sqrt2;
+                triplets.emplace_back(basis_with_zero, i, inv_sqrt2);
+                triplets.emplace_back(basis_with_one, i, -inv_sqrt2);
             }
         }
         
+        SparseMatrixXcd result(dim, dim);
+        result.setFromTriplets(triplets.begin(), triplets.end());
         return result;
     }
     
-    static inline MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
-        MatrixXcd result = MatrixXcd::Identity(dim, dim);
+    static inline constexpr SparseMatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int dim) {
+        std::vector<Eigen::Triplet<Complex>> triplets;
+        triplets.reserve(dim); // CX gate permutes some basis states
         
         for (int i = 0; i < dim; ++i) {
             if (i & (1 << control_qubit)) {
                 int flipped = i ^ (1 << target_qubit);
-                result(i, i) = 0.0;
-                result(flipped, i) = 1.0;
+                triplets.emplace_back(flipped, i, Complex(1.0, 0.0));
+            } else {
+                triplets.emplace_back(i, i, Complex(1.0, 0.0));
             }
         }
         
+        SparseMatrixXcd result(dim, dim);
+        result.setFromTriplets(triplets.begin(), triplets.end());
         return result;
     }
 };
 
-// Native fidelity calculation
-static inline double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
+// Native fidelity calculation - now works with sparse matrices
+static inline double calculate_fidelity(const SparseMatrixXcd& U1, const SparseMatrixXcd& U2) {
     if (U1.rows() != U2.rows() || U1.cols() != U2.cols()) {
         throw std::invalid_argument("Matrix dimensions must match");
     }
     
-    MatrixXcd product = U1.adjoint() * U2;
-    Complex trace = product.trace();
-    double fidelity = std::norm(trace) / (U1.rows() * U1.rows());
+    // Sparse matrix multiplication
+    SparseMatrixXcd product = U1.adjoint() * U2;
     
+    // Compute trace efficiently for sparse matrix
+    Complex trace = 0;
+    for (int k = 0; k < product.outerSize(); ++k) {
+        for (SparseMatrixXcd::InnerIterator it(product, k); it; ++it) {
+            if (it.row() == it.col()) {
+                trace += it.value();
+            }
+        }
+    }
+    
+    double fidelity = std::norm(trace) / (U1.rows() * U1.rows());
     return fidelity;
 }
 
 // Fast fitness calculation
-static inline double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
+static inline double calculate_fitness(const CircuitIndividual& circuit, const SparseMatrixXcd& target_unitary, 
                         double alpha = 10.0, double beta = 1.0, int target_depth = 20) {
     try {
-        MatrixXcd circuit_unitary = circuit.circuit_to_unitary();
+        SparseMatrixXcd circuit_unitary = circuit.circuit_to_unitary();
         double fid = calculate_fidelity(circuit_unitary, target_unitary);
         
         // Multi-objective fitness with depth penalty
@@ -516,7 +572,7 @@ private:
     std::shared_ptr<CircuitIndividual> best_individual;
     std::vector<double> fitness_history;
     
-    MatrixXcd target_unitary;  // Store target unitary
+    SparseMatrixXcd target_unitary;  // Store target unitary as sparse
     
     std::function<double(const CircuitIndividual&)> fitness_func;
     
@@ -772,9 +828,15 @@ public:
           gate_set(std::move(g_set)) {
     }
     
-    // Set target unitary for native fitness calculation
-    inline void set_target_unitary(const MatrixXcd& target) {
+    // Set target unitary for native fitness calculation - now accepts sparse
+    inline void set_target_unitary(const SparseMatrixXcd& target) {
         target_unitary = target;
+    }
+    
+    // Overload for dense matrices (converts to sparse)
+    inline void set_target_unitary(const MatrixXcd& target) {
+        target_unitary = target.sparseView();
+        target_unitary.makeCompressed();
     }
     
     inline void set_fitness_function(std::function<double(const CircuitIndividual&)> func) {
@@ -791,7 +853,7 @@ public:
         optimizer.set_objective([&](const std::vector<double>& params) {
             CircuitIndividual temp = individual;
             temp.set_parameters(params);
-            const MatrixXcd circuit_unitary = temp.circuit_to_unitary();
+            const SparseMatrixXcd circuit_unitary = temp.circuit_to_unitary();
             const double fid = calculate_fidelity(circuit_unitary, target_unitary);
             return 1.0 - fid; // COBYLA minimizes, so we return 1 - fidelity
         });
@@ -1160,7 +1222,8 @@ PYBIND11_MODULE(ModuleName, m) {
         .def("set_parameters", &CircuitIndividual::set_parameters)
         .def("gate_counts", &CircuitIndividual::gate_counts)
         .def("count_non_id_gates", &CircuitIndividual::count_non_id_gates)
-        .def("circuit_to_unitary", &CircuitIndividual::circuit_to_unitary)
+        .def("circuit_to_unitary", &CircuitIndividual::circuit_to_unitary, py::return_value_policy::move)
+        .def("circuit_to_unitary_dense", &CircuitIndividual::circuit_to_unitary_dense)
         .def("optimize_structure", &CircuitIndividual::optimize_structure);
     
     // QuantumEvolutionaryOptimizer class
@@ -1171,7 +1234,8 @@ PYBIND11_MODULE(ModuleName, m) {
              py::arg("replace_rate"), py::arg("alpha"), py::arg("beta"), py::arg("target_depth"),
              py::arg("gate_set"), py::arg("param_freq") = 25, py::arg("param_rate") = 0.1)
         .def("set_fitness_function", &QuantumEvolutionaryOptimizer::set_fitness_function)
-        .def("set_target_unitary", &QuantumEvolutionaryOptimizer::set_target_unitary)
+        .def("set_target_unitary", py::overload_cast<const SparseMatrixXcd&>(&QuantumEvolutionaryOptimizer::set_target_unitary))
+        .def("set_target_unitary", py::overload_cast<const MatrixXcd&>(&QuantumEvolutionaryOptimizer::set_target_unitary))
         .def("optimize_parameters", &QuantumEvolutionaryOptimizer::optimize_parameters)
         .def("apply_parameter_optimization", &QuantumEvolutionaryOptimizer::apply_parameter_optimization)
         .def("create_random_circuit", &QuantumEvolutionaryOptimizer::create_random_circuit)
@@ -1198,6 +1262,15 @@ PYBIND11_MODULE(ModuleName, m) {
     // Helper function to create identity matrix
     m.def("identity_matrix", [](int n_qubits) {
         int dim = 1 << n_qubits;
-        return MatrixXcd::Identity(dim, dim);
+        SparseMatrixXcd identity(dim, dim);
+        identity.setIdentity();
+        return identity;
     }, "Create identity matrix for n qubits");
+    
+    // Helper function to convert dense to sparse
+    m.def("to_sparse", [](const MatrixXcd& dense) {
+        SparseMatrixXcd sparse = dense.sparseView();
+        sparse.makeCompressed();
+        return sparse;
+    }, "Convert dense matrix to sparse");
 }
