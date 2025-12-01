@@ -4,7 +4,7 @@ from typing import List, Dict
 import numpy as np
 
 try:
-    from qext_visualize import VisualQuantumOptimizer
+    from visualize import VisualQuantumOptimizer
     HAS_EXT = True
 except ImportError:
     HAS_EXT = False
