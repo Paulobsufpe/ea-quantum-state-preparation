@@ -55,7 +55,7 @@ public:
         int nfev;
     };
     
-    Result minimize(const std::vector<double>& x0) {
+    inline Result minimize(const std::vector<double>& x0) const {
         Result result;
         result.x = x0;
         result.nfev = 0;
@@ -138,8 +138,8 @@ struct Gate {
         qubits.erase(std::unique(qubits.begin(), qubits.end()), qubits.end());
     }
     
-    bool is_single_qubit() const { return qubits.size() == 1; }
-    bool is_two_qubit() const { return qubits.size() == 2; }
+    inline constexpr bool is_single_qubit() const { return qubits.size() == 1; }
+    inline constexpr bool is_two_qubit() const { return qubits.size() == 2; }
 };
 
 // Circuit individual
@@ -166,7 +166,7 @@ public:
     CircuitIndividual() : num_qubits(0), depth(0), fitness(-1e9), fidelity(0.0), normalized_depth(0.0) {}
     
     // Get used qubits in a layer
-    std::vector<bool> get_used_qubits(int layer_idx) const {
+    inline std::vector<bool> get_used_qubits(int layer_idx) const {
         std::vector<bool> used(num_qubits, false);
         if (layer_idx >= 0 && layer_idx < static_cast<int>(layers.size())) {
             for (const auto& gate : layers[layer_idx]) {
@@ -179,7 +179,7 @@ public:
     }
     
     // Get available qubits
-    std::vector<int> get_available_qubits(const std::vector<bool>& used) const {
+    inline std::vector<int> get_available_qubits(const std::vector<bool>& used) const {
         std::vector<int> available;
         for (int q = 0; q < num_qubits; ++q) {
             if (!used[q]) available.push_back(q);
@@ -188,7 +188,7 @@ public:
     }
     
     // Get parameters for optimization
-    std::vector<double> get_parameters() const {
+    inline std::vector<double> get_parameters() const {
         std::vector<double> params;
         for (const auto& layer : layers) {
             for (const auto& gate : layer) {
@@ -201,7 +201,7 @@ public:
     }
     
     // Set parameters
-    void set_parameters(const std::vector<double>& params) {
+    inline constexpr void set_parameters(const std::vector<double>& params) {
         size_t param_idx = 0;
         for (auto& layer : layers) {
             for (auto& gate : layer) {
@@ -215,7 +215,7 @@ public:
     }
     
     // Count gates by type
-    std::unordered_map<GateType, int> gate_counts() const {
+    inline std::unordered_map<GateType, int> gate_counts() const {
         std::unordered_map<GateType, int> counts;
         for (const auto& layer : layers) {
             for (const auto& gate : layer) {
@@ -226,7 +226,7 @@ public:
     }
     
     // Get number of non-identity gates
-    int count_non_id_gates() const {
+    inline constexpr int count_non_id_gates() const {
         int count = 0;
         for (const auto& layer : layers) {
             for (const auto& gate : layer) {
@@ -239,7 +239,7 @@ public:
     }
     
     // Optimize circuit structure - remove empty layers and redundant gates
-    CircuitIndividual optimize_structure() const {
+    inline CircuitIndividual optimize_structure() const {
         std::vector<std::vector<Gate>> new_layers;
         
         for (const auto& layer : layers) {
@@ -262,7 +262,7 @@ public:
     }
     
     // Convert circuit to unitary matrix using Eigen
-    MatrixXcd circuit_to_unitary() const {
+    inline MatrixXcd circuit_to_unitary() const {
         int dim = 1 << num_qubits; // 2^n
         MatrixXcd unitary = MatrixXcd::Identity(dim, dim);
         
@@ -283,7 +283,7 @@ public:
     }
     
 private:
-    MatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) const {
+    static inline MatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) {
         int dim = 1 << total_qubits;
         
         switch (gate.type) {
@@ -305,7 +305,7 @@ private:
         }
     }
     
-    MatrixXcd get_pauli_x_matrix(int target_qubit, int total_qubits) const {
+    static inline MatrixXcd get_pauli_x_matrix(int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         
@@ -317,7 +317,7 @@ private:
         return result;
     }
     
-    MatrixXcd get_sx_matrix(int target_qubit, int total_qubits) const {
+    static inline MatrixXcd get_sx_matrix(int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         Complex half_plus_half_i = Complex(0.5, 0.5);
@@ -341,7 +341,7 @@ private:
         return result;
     }
     
-    MatrixXcd get_rz_matrix(double angle, int target_qubit, int total_qubits) const {
+    static inline MatrixXcd get_rz_matrix(double angle, int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         Complex phase0 = std::exp(Complex(0, -angle/2));
@@ -358,7 +358,7 @@ private:
         return result;
     }
     
-    MatrixXcd get_hadamard_matrix(int target_qubit, int total_qubits) const {
+    static inline MatrixXcd get_hadamard_matrix(int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         double inv_sqrt2 = 1.0 / std::sqrt(2.0);
@@ -379,7 +379,7 @@ private:
         return result;
     }
     
-    MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int total_qubits) const {
+    static inline MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Identity(dim, dim);
         
@@ -396,7 +396,7 @@ private:
 };
 
 // Native fidelity calculation
-double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
+static inline double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
     if (U1.rows() != U2.rows() || U1.cols() != U2.cols()) {
         throw std::invalid_argument("Matrix dimensions must match");
     }
@@ -409,7 +409,7 @@ double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
 }
 
 // Fast fitness calculation
-double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
+static inline double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
                         double alpha = 10.0, double beta = 1.0, int target_depth = 20) {
     try {
         MatrixXcd circuit_unitary = circuit.circuit_to_unitary();
@@ -432,44 +432,37 @@ class RandomGenerator {
 private:
     // Thread-local storage for random generators
     static thread_local std::mt19937 gen;
-    std::uniform_real_distribution<double> real_dist;
     
 public:
-    RandomGenerator() : real_dist(0.0, 1.0) {
-        // Initialize thread-local generator if not already initialized
-        if (gen == std::mt19937{}) {
-            std::random_device rd;
-            gen.seed(rd() + omp_get_thread_num() * 1000); // Different seed per thread
-        }
+    inline RandomGenerator() {
+        std::random_device rd;
+        gen = std::mt19937 { rd() + omp_get_thread_num() * 1000 };
     }
     
-    // Seed constructor for thread safety
-    RandomGenerator(int seed) : real_dist(0.0, 1.0) {
-        gen.seed(seed);
+    static inline double random_double(double min = 0.0, double max = 1.0) {
+        if (min > max) std::swap(min, max);
+        std::uniform_real_distribution<double> dist(min, max);
+        return dist(gen);
     }
     
-    double random_double(double min = 0.0, double max = 1.0) {
-        return min + (max - min) * real_dist(gen);
-    }
-    
-    int random_int(int min, int max) {
+    static inline int random_int(int min, int max) {
         if (min > max) std::swap(min, max);
         std::uniform_int_distribution<int> dist(min, max);
         return dist(gen);
     }
     
-    bool random_bool() {
-        return random_double() < 0.5;
+    static inline bool random_bool() {
+        return random_int(0, 1) ? true : false;
     }
     
     template<typename T>
-    T random_choice(const std::vector<T>& items) {
+    static inline T random_choice(const std::vector<T>& items) {
         if (items.empty()) throw std::runtime_error("Cannot choose from empty list");
         return items[random_int(0, static_cast<int>(items.size()) - 1)];
     }
     
     template<typename T>
-    std::vector<T> random_sample(const std::vector<T>& population, int k) {
+    static inline std::vector<T> random_sample(const std::vector<T>& population, int k) {
         if (k <= 0) return {};
         if (k >= static_cast<int>(population.size())) return population;
         
@@ -489,25 +482,25 @@ public:
 
 // Initialize thread-local random generator
 thread_local std::mt19937 RandomGenerator::gen;
-static thread_local RandomGenerator rng;
+thread_local RandomGenerator rng;
 
 // Enhanced QuantumEvolutionaryOptimizer with hybrid optimization
 class QuantumEvolutionaryOptimizer {
 private:
-    int num_qubits;
-    int population_size;
-    int generations;
-    double crossover_rate;
-    double mutation_rate;
-    double offspring_rate;
-    double replace_rate;
-    double alpha;
-    double beta;
-    int target_depth;
-    int param_optimization_frequency;
-    double param_optimization_rate;
-    
-    std::vector<GateType> gate_set;
+    const int num_qubits;
+    const int population_size;
+    const int generations;
+    const double crossover_rate;
+    const double mutation_rate;
+    const double offspring_rate;
+    const double replace_rate;
+    const double alpha;
+    const double beta;
+    const int target_depth;
+    const int param_optimization_frequency;
+    const double param_optimization_rate;
+
+    const std::vector<GateType> gate_set;
     std::vector<CircuitIndividual> population;
     std::shared_ptr<CircuitIndividual> best_individual;
     std::vector<double> fitness_history;
@@ -517,7 +510,7 @@ private:
     std::function<double(const CircuitIndividual&)> fitness_func;
     
     // Helper function to get available qubits
-    std::vector<int> get_available_qubits(const std::vector<bool>& used) const {
+    static inline std::vector<int> get_available_qubits(const std::vector<bool>& used) {
         std::vector<int> available;
         for (int i = 0; i < static_cast<int>(used.size()); ++i) {
             if (!used[i]) available.push_back(i);
@@ -540,17 +533,17 @@ public:
     }
     
     // Set target unitary for native fitness calculation
-    void set_target_unitary(const MatrixXcd& target) {
+    inline void set_target_unitary(const MatrixXcd& target) {
         target_unitary = target;
     }
     
-    void set_fitness_function(std::function<double(const CircuitIndividual&)> func) {
+    inline void set_fitness_function(std::function<double(const CircuitIndividual&)> func) {
         fitness_func = std::move(func);
     }
     
     // Hybrid parameter optimization using COBYLA
-    void optimize_parameters(CircuitIndividual& individual) {
-        std::vector<double> current_params = individual.get_parameters();
+    inline void optimize_parameters(CircuitIndividual& individual) const {
+        const std::vector<double> current_params = individual.get_parameters();
         if (current_params.empty()) return;
         
         cobyla::COBYLA optimizer(static_cast<int>(current_params.size()), 0, 0.1, 1e-4, 100);
@@ -558,20 +551,20 @@ public:
         optimizer.set_objective([&](const std::vector<double>& params) {
             CircuitIndividual temp = individual;
             temp.set_parameters(params);
-            MatrixXcd circuit_unitary = temp.circuit_to_unitary();
-            double fid = calculate_fidelity(circuit_unitary, target_unitary);
+            const MatrixXcd circuit_unitary = temp.circuit_to_unitary();
+            const double fid = calculate_fidelity(circuit_unitary, target_unitary);
             return 1.0 - fid; // COBYLA minimizes, so we return 1 - fidelity
         });
         
-        auto result = optimizer.minimize(current_params);
+        const auto result = optimizer.minimize(current_params);
         if (result.success) {
             individual.set_parameters(result.x);
         }
     }
     
     // Apply parameter optimization to population subset
-    void apply_parameter_optimization() {
-        int num_to_optimize = std::max(1, static_cast<int>(population_size * param_optimization_rate));
+    inline void apply_parameter_optimization() const {
+        const int num_to_optimize = std::max(1, static_cast<int>(population_size * param_optimization_rate));
         auto candidates = rng.random_sample(population, num_to_optimize);
         
         // Parallel parameter optimization with OpenMP
@@ -586,7 +579,7 @@ public:
     }
     
     // Create random circuit
-    CircuitIndividual create_random_circuit(int depth) {
+    inline CircuitIndividual create_random_circuit(int depth) const {
         std::vector<std::vector<Gate>> layers;
         
         for (int i = 0; i < depth; ++i) {
@@ -626,7 +619,7 @@ public:
         return CircuitIndividual(num_qubits, depth, std::move(layers));
     }
     
-    void initialize_population(int initial_depth, bool from_target = false) {
+    inline void initialize_population(int initial_depth, bool from_target = false) {
         population.clear();
         best_individual.reset();
         fitness_history.clear();
@@ -637,9 +630,9 @@ public:
     }
     
     // Tournament selection
-    std::pair<CircuitIndividual, CircuitIndividual> tournament_selection(int tournament_size = 3) {
-        auto tournament1 = rng.random_sample(population, tournament_size);
-        auto tournament2 = rng.random_sample(population, tournament_size);
+    inline std::pair<CircuitIndividual, CircuitIndividual> tournament_selection(int tournament_size = 3) const {
+        const auto tournament1 = rng.random_sample(population, tournament_size);
+        const auto tournament2 = rng.random_sample(population, tournament_size);
         
         if (tournament1.empty() || tournament2.empty()) {
             if (population.size() >= 2) {
@@ -651,11 +644,11 @@ public:
             }
         }
         
-        auto best1 = *std::max_element(tournament1.begin(), tournament1.end(),
+        const auto best1 = *std::max_element(tournament1.begin(), tournament1.end(),
                                      [](const CircuitIndividual& a, const CircuitIndividual& b) {
                                          return a.fitness < b.fitness;
                                      });
-        auto best2 = *std::max_element(tournament2.begin(), tournament2.end(),
+        const auto best2 = *std::max_element(tournament2.begin(), tournament2.end(),
                                      [](const CircuitIndividual& a, const CircuitIndividual& b) {
                                          return a.fitness < b.fitness;
                                      });
@@ -664,7 +657,7 @@ public:
     }
     
     // Roulette wheel selection
-    std::pair<CircuitIndividual, CircuitIndividual> roulette_selection() {
+    inline std::pair<CircuitIndividual, CircuitIndividual> roulette_selection() const {
         // Calculate total fitness
         double total_fitness = 0.0;
         for (const auto& individual : population) {
@@ -717,7 +710,7 @@ public:
     }
     
     // Selection method dispatcher
-    std::pair<CircuitIndividual, CircuitIndividual> select_parents(const std::string& method) {
+    inline std::pair<CircuitIndividual, CircuitIndividual> select_parents(const std::string& method) const {
         if (method == "roulette") {
             return roulette_selection();
         } else { // Default to tournament
@@ -726,12 +719,12 @@ public:
     }
     
     // Simple uniform crossover
-    CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2) {
+    inline CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2) const {
         if (rng.random_double() > crossover_rate || parent1.layers.empty() || parent2.layers.empty()) {
             return rng.random_bool() ? parent1 : parent2;
         }
         
-        int child_depth = std::max(parent1.depth, parent2.depth);
+        const int child_depth = std::max(parent1.depth, parent2.depth);
         std::vector<std::vector<Gate>> child_layers;
         
         for (int i = 0; i < child_depth; ++i) {
@@ -748,7 +741,7 @@ public:
     }
     
     // Simple mutation
-    CircuitIndividual mutate(CircuitIndividual individual) {
+    inline CircuitIndividual mutate(CircuitIndividual individual) const {
         if (rng.random_double() > mutation_rate || individual.layers.empty()) {
             return individual;
         }
@@ -775,7 +768,7 @@ public:
         return individual;
     }
     
-    void evaluate_population_fitness(std::vector<CircuitIndividual>& individuals) {
+    inline void evaluate_population_fitness(std::vector<CircuitIndividual>& individuals) const {
         if (!fitness_func) return;
         
         // Parallel evaluation with OpenMP - safe and reliable
@@ -786,14 +779,14 @@ public:
     }
     
     // Enhanced evolution with hybrid optimization
-    CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "tournament") {
+    inline CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "tournament") {
         initialize_population(target_depth, !from_scratch);
         
         // Evaluate initial population
         evaluate_population_fitness(population);
         
-        int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
-        int num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
+        const int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
+        const int num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
         
         for (int generation = 0; generation < generations; ++generation) {
             // Apply parameter optimization every N generations
@@ -832,7 +825,7 @@ public:
             
             // Track best individual
             if (!population.empty()) {
-                auto best_it = std::max_element(population.begin(), population.end(),
+                const auto best_it = std::max_element(population.begin(), population.end(),
                                               [](const CircuitIndividual& a, const CircuitIndividual& b) {
                                                   return a.fitness < b.fitness;
                                               });
