@@ -1,28 +1,40 @@
 CC :=clang
 CXX:=clang++
 
-PYTHON_PKG_CONFIG:=$$(pkg-config --cflags python)
-CFLAGS:=-shared -fpic -Wall -Wextra -fno-plt -fstack-protector-strong
-CXXFLAGS:=${CFLAGS} -std=c++23 -fno-rtti
-OPTFLAGS:=-O0 -g
+ARGS:=
 
-QISKIT_LDFLAGS:=-l:_accelerate.cpython-313-x86_64-linux-gnu.so -lqiskit -Wl,-z,now,-rpath,/usr/local/lib
+PKG_CONFIG_INC:=$$(pkg-config --cflags python --cflags eigen3)
+CFLAGS:=-fPIC -Wall -Wextra -fno-plt -fstack-protector-strong -fno-math-errno -fno-trapping-math -fvisibility=hidden -gdwarf-5
+CXXFLAGS:=${CFLAGS} -std=c++23
+OPTFLAGS:=-O3 -march=native -ffast-math
+
+# QISKIT_LDFLAGS:=-l:_accelerate.cpython-313-x86_64-linux-gnu.so -lqiskit -Wl,-z,now,-rpath,/usr/local/lib
 LDFLAGS:=${QISKIT_LDFLAGS} -Wl,-z,now,-z,relro,-z,noexecstack,--gc-sections
 
-# PYBIND_INC:=$$(/usr/bin/env python3 -m pybind11 --includes)
+PYBIND_INC:=$$(/usr/bin/env python3 -m pybind11 --includes)
 # PYBIND_EXT:=$$(/usr/bin/env python3 -m pybind11 --extension-suffix)
 
-all: $(patsubst %.cpp, %.so, $(wildcard *.cpp))
+# all: $(patsubst %.cpp, %.so, $(wildcard *.cpp))
+all: qext.so qext_omp.so
 
 .PHONY: all run clean
 
 r: run
-run: test_cpp.py all
-	VIRTUAL_ENV=~/.virtualenvs/qiskit uv run $<
+run: visualize.py .venv qext.so qext_omp.so
+	uv run $< ${ARGS}
 
 cl: clean
 clean:
-	fd -e so -I -X rm; rm compile_commands.json
+	rm qext.so qext_omp.so *.o
 
-%.so: %.cpp
-	${CXX} $< ${CXXFLAGS} ${PYTHON_PKG_CONFIG} ${OPTFLAGS} ${LDFLAGS} -o $@
+qext.so: qext.o
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${LDFLAGS} $^ -shared -o $@
+
+qext.o: qext_hybrid.cpp
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PYBIND_INC} ${PKG_CONFIG_INC} -c $< -o $@
+
+qext_omp.so: qext_omp.o
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${LDFLAGS} $^ -shared -o $@ -fopenmp
+
+qext_omp.o: qext_hybrid.cpp
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PYBIND_INC} ${PKG_CONFIG_INC} -c $< -o $@ -fopenmp
