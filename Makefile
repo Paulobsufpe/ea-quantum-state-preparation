@@ -3,8 +3,11 @@ CXX:=clang++
 
 ARGS:=
 
-PKG_CONFIG_INC:=$$(pkg-config --cflags python --cflags eigen3)
-CFLAGS:=-fPIC -Wall -Wextra -fno-plt -fstack-protector-strong -fno-math-errno -fno-trapping-math -fvisibility=hidden -gdwarf-5
+PKG_CONFIG_INC:=$$(pkg-config --cflags python eigen3)
+PKG_CONFIG_LIB:=-lopenblas
+CFLAGS:=-fPIC -Wall -Wextra -fno-plt -fstack-protector-strong \
+				-fno-math-errno -fno-trapping-math -fvisibility=hidden -gdwarf-5 \
+				-fno-omit-frame-pointer
 CXXFLAGS:=${CFLAGS} -std=c++23
 OPTFLAGS:=-O3 -march=native -ffast-math
 
@@ -28,13 +31,13 @@ clean:
 	rm qext.so qext_omp.so *.o
 
 qext.so: qext.o
-	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${LDFLAGS} $^ -shared -o $@
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PKG_CONFIG_LIB} ${LDFLAGS} $^ -shared -o $@
 
 qext.o: qext_hybrid.cpp
-	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PYBIND_INC} ${PKG_CONFIG_INC} -c $< -o $@
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PKG_CONFIG_INC} ${PYBIND_INC} -c $< -o $@
 
 qext_omp.so: qext_omp.o
-	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${LDFLAGS} $^ -shared -o $@ -fopenmp
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PKG_CONFIG_LIB} ${LDFLAGS} $^ -shared -o $@ -fopenmp
 
 qext_omp.o: qext_hybrid.cpp
-	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PYBIND_INC} ${PKG_CONFIG_INC} -c $< -o $@ -fopenmp
+	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PKG_CONFIG_INC} ${PYBIND_INC} -c $< -o $@ -fopenmp

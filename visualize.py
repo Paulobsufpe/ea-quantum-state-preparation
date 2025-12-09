@@ -316,10 +316,10 @@ def create_comparison_optimizer():
     """Create an optimizer for comparison between hybrid and standard approaches"""
     print("Creating comparison optimizer with 3 qubits...")
     return VisualQuantumOptimizer(
-        num_qubits=3,
-        target_depth=12,
-        population_size=1000,
-        generations=2000,
+        num_qubits=4,
+        target_depth=20,
+        population_size=200,
+        generations=1000,
         use_hybrid=True
     )
 
