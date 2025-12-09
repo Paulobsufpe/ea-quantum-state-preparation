@@ -420,7 +420,7 @@ static inline double calculate_fitness(const CircuitIndividual& circuit, const M
             static_cast<double>(circuit.depth - 1) / (target_depth - 1) : 0.0;
         
         double fitness = alpha * fid - beta * normalized_depth;
-        return std::max(fitness, 0.0);
+        return std::max(fitness, -1e9);
     } catch (const std::exception& e) {
         std::cerr << "Error in fitness calculation: " << e.what() << std::endl;
         return 0.0;
