@@ -217,7 +217,7 @@ public:
     }
     
     // Count gates by type
-    inline std::unordered_map<GateType, int> gate_counts() const {
+    inline constexpr std::unordered_map<GateType, int> gate_counts() const {
         std::unordered_map<GateType, int> counts;
         for (const auto& layer : layers) {
             for (const auto& gate : layer) {
@@ -241,18 +241,19 @@ public:
     }
     
     // Optimize circuit structure - remove empty layers and redundant gates
-    inline CircuitIndividual optimize_structure() const {
+    inline constexpr CircuitIndividual optimize_structure() const {
         std::vector<std::vector<Gate>> new_layers;
         
         for (const auto& layer : layers) {
-            std::vector<Gate> new_layer;
+            bool have_non_id_gate = false;
             for (const auto& gate : layer) {
                 if (gate.type != GateType::ID) {
-                    new_layer.push_back(gate);
+                    have_non_id_gate = true;
+                    break;
                 }
             }
-            if (!new_layer.empty()) {
-                new_layers.push_back(std::move(new_layer));
+            if (have_non_id_gate) {
+                new_layers.push_back(std::move(layer));
             }
         }
         
@@ -264,17 +265,19 @@ public:
     }
     
     // Convert circuit to unitary matrix using Eigen
-    inline MatrixXcd circuit_to_unitary() const {
+    inline constexpr MatrixXcd circuit_to_unitary() const {
         int dim = 1 << num_qubits; // 2^n
         MatrixXcd unitary = MatrixXcd::Identity(dim, dim);
+        MatrixXcd layer_matrix {};
+        MatrixXcd gate_matrix {};
         
         for (const auto& layer : layers) {
-            MatrixXcd layer_matrix = MatrixXcd::Identity(dim, dim);
+            layer_matrix = MatrixXcd::Identity(dim, dim);
             
             for (const auto& gate : layer) {
                 if (gate.type == GateType::ID) continue;
                 
-                MatrixXcd gate_matrix = get_gate_matrix(gate, num_qubits);
+                gate_matrix = get_gate_matrix(gate, num_qubits);
                 layer_matrix = gate_matrix * layer_matrix;
             }
             
@@ -285,7 +288,7 @@ public:
     }
     
 private:
-    static inline MatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) {
+    static inline constexpr MatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) {
         int dim = 1 << total_qubits;
         
         switch (gate.type) {
@@ -307,7 +310,7 @@ private:
         }
     }
     
-    static inline MatrixXcd get_pauli_x_matrix(int target_qubit, int total_qubits) {
+    static inline constexpr MatrixXcd get_pauli_x_matrix(int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         
@@ -319,7 +322,7 @@ private:
         return result;
     }
     
-    static inline MatrixXcd get_sx_matrix(int target_qubit, int total_qubits) {
+    static inline constexpr MatrixXcd get_sx_matrix(int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         Complex half_plus_half_i = Complex(0.5, 0.5);
@@ -343,7 +346,7 @@ private:
         return result;
     }
     
-    static inline MatrixXcd get_rz_matrix(double angle, int target_qubit, int total_qubits) {
+    static inline constexpr MatrixXcd get_rz_matrix(double angle, int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         Complex phase0 = std::exp(Complex(0, -angle/2));
@@ -360,7 +363,7 @@ private:
         return result;
     }
     
-    static inline MatrixXcd get_hadamard_matrix(int target_qubit, int total_qubits) {
+    static inline constexpr MatrixXcd get_hadamard_matrix(int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         double inv_sqrt2 = 1.0 / std::sqrt(2.0);
@@ -381,7 +384,7 @@ private:
         return result;
     }
     
-    static inline MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int total_qubits) {
+    static inline constexpr MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int total_qubits) {
         int dim = 1 << total_qubits;
         MatrixXcd result = MatrixXcd::Identity(dim, dim);
         
@@ -398,7 +401,7 @@ private:
 };
 
 // Native fidelity calculation
-static inline double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
+static inline constexpr double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
     if (U1.rows() != U2.rows() || U1.cols() != U2.cols()) {
         throw std::invalid_argument("Matrix dimensions must match");
     }
@@ -411,7 +414,7 @@ static inline double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2
 }
 
 // Fast fitness calculation
-static inline double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
+static inline constexpr double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
                         double alpha = 10.0, double beta = 1.0, int target_depth = 20) {
     try {
         MatrixXcd circuit_unitary = circuit.circuit_to_unitary();
@@ -422,7 +425,7 @@ static inline double calculate_fitness(const CircuitIndividual& circuit, const M
             static_cast<double>(circuit.depth - 1) / (target_depth - 1) : 0.0;
         
         double fitness = alpha * fid - beta * normalized_depth;
-        return std::max(fitness, -1e9);
+        return fitness;
     } catch (const std::exception& e) {
         std::cerr << "Error in fitness calculation: " << e.what() << std::endl;
         return 0.0;
@@ -441,30 +444,30 @@ public:
         gen = std::mt19937 { rd() + omp_get_thread_num() * 1000 };
     }
     
-    static inline double random_double(double min = 0.0, double max = 1.0) {
+    static inline constexpr double random_double(double min = 0.0, double max = 1.0) noexcept {
         if (min > max) std::swap(min, max);
         std::uniform_real_distribution<double> dist(min, max);
         return dist(gen);
     }
     
-    static inline int random_int(int min, int max) {
+    static inline constexpr int random_int(int min, int max) noexcept {
         if (min > max) std::swap(min, max);
         std::uniform_int_distribution<int> dist(min, max);
         return dist(gen);
     }
     
-    static inline bool random_bool() {
+    static inline constexpr bool random_bool() noexcept {
         return random_int(0, 1) ? true : false;
     }
     
     template<typename T>
-    static inline T random_choice(const std::vector<T>& items) {
+    static inline constexpr T random_choice(const std::vector<T>& items) {
         if (items.empty()) throw std::runtime_error("Cannot choose from empty list");
         return items[random_int(0, static_cast<int>(items.size()) - 1)];
     }
     
     template<typename T>
-    static inline std::vector<T> random_sample(const std::vector<T>& population, int k) {
+    static inline constexpr std::vector<T> random_sample(const std::vector<T>& population, int k) noexcept {
         if (k <= 0) return {};
         if (k >= static_cast<int>(population.size())) return population;
         
@@ -861,7 +864,8 @@ public:
         return CircuitIndividual(num_qubits, depth, std::move(layers));
     }
     
-    inline void initialize_population(int initial_depth, bool from_target = false) {
+    // TODO: make use of from_target
+    inline void initialize_population(int initial_depth, [[maybe_unused]] bool from_target = false) {
         population.clear();
         best_individual.reset();
         fitness_history.clear();
