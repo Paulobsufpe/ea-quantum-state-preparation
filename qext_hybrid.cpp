@@ -823,6 +823,7 @@ public:
         }
     }
     
+    // FIX: this function must have a bug
     // Create random circuit
     inline CircuitIndividual create_random_circuit(int depth) const {
         std::vector<std::vector<Gate>> layers;
