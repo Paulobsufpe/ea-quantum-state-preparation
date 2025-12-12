@@ -1,4 +1,5 @@
 // qext_hybrid_fixed.cpp
+#include <optional>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
@@ -156,6 +157,7 @@ public:
     double fitness;
     double fidelity;
     double normalized_depth;
+    std::optional<MatrixXcd> unitary;
     
     CircuitIndividual(int nq, int d, std::vector<std::vector<Gate>> l = {})
         : num_qubits(nq), depth(d), layers(std::move(l)), fitness(-1e9), fidelity(0.0), normalized_depth(0.0) {
@@ -265,9 +267,10 @@ public:
     }
     
     // Convert circuit to unitary matrix using Eigen
-    inline constexpr MatrixXcd circuit_to_unitary() const {
+    inline constexpr MatrixXcd circuit_to_unitary() {
+        if (unitary.has_value()) return unitary.value();
         int dim = 1 << num_qubits; // 2^n
-        MatrixXcd unitary = MatrixXcd::Identity(dim, dim);
+        MatrixXcd unitary_matrix = MatrixXcd::Identity(dim, dim);
         MatrixXcd layer_matrix {};
         MatrixXcd gate_matrix {};
         
@@ -281,10 +284,10 @@ public:
                 layer_matrix = gate_matrix * layer_matrix;
             }
             
-            unitary = layer_matrix * unitary;
+            unitary_matrix = layer_matrix * unitary_matrix;
         }
-        
-        return unitary;
+        unitary = unitary_matrix;
+        return unitary_matrix;
     }
     
 private:
@@ -414,7 +417,7 @@ static inline constexpr double calculate_fidelity(const MatrixXcd& U1, const Mat
 }
 
 // Fast fitness calculation
-static inline constexpr double calculate_fitness(const CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
+static inline constexpr double calculate_fitness(CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
                         double alpha = 10.0, double beta = 1.0, int target_depth = 20) {
     try {
         MatrixXcd circuit_unitary = circuit.circuit_to_unitary();
