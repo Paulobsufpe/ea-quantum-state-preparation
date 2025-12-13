@@ -4,6 +4,8 @@ import time
 
 try:
     from qiskit import QuantumCircuit
+    from qiskit.circuit.random import random_circuit
+    from qiskit.quantum_info import Operator
     HAS_QISKIT = True
 except ImportError:
     HAS_QISKIT = False
@@ -59,13 +61,17 @@ class VisualQuantumOptimizer:
                          GateType.SX, GateType.RZ, GateType.CX, GateType.H]
 
         # Create a random target circuit
-        temp_optimizer = QuantumEvolutionaryOptimizer(
-            num_qubits, 1, 1, 0.85, 0.85, 0.3, 0.3, 10.0, 1.0,
-            target_depth, self.gate_set
-        )
-        self.target_circuit = \
-            temp_optimizer.create_random_circuit(target_depth)
-        self.target_unitary = self.target_circuit.circuit_to_unitary()
+        # temp_optimizer = QuantumEvolutionaryOptimizer(
+        #     num_qubits, 1, 1, 0.85, 0.85, 0.3, 0.3, 10.0, 1.0,
+        #     target_depth, self.gate_set
+        # )
+        # self.target_circuit = \
+        #     temp_optimizer.create_random_circuit(target_depth)
+        # self.target_unitary = self.target_circuit.circuit_to_unitary()
+
+        circ = random_circuit(num_qubits, target_depth)
+        self.target_circuit = circ
+        self.target_unitary = Operator(circ).data
 
         # Set hybrid optimization parameters
         param_freq = 25 if use_hybrid else 1000  # Disable if not hybrid
@@ -172,29 +178,29 @@ class VisualQuantumOptimizer:
             print(qc.draw(output='text'))
 
             # Optional: Show unitary matrix
-            if show_unitary:
-                print("\nUnitary matrix (first 4x4 block):")
-                dim = min(4, unitary.rows())
-                for i in range(dim):
-                    row = "  ".join(
-                        [f"{unitary(i, j).real:.3f}{unitary(i, j).imag:+.3f}j"
-                            for j in range(dim)])
-                    print(f"  [{row}]")
+            # if show_unitary:
+            #     print("\nUnitary matrix (first 4x4 block):")
+            #     dim = min(4, unitary.rows())
+            #     for i in range(dim):
+            #         row = "  ".join(
+            #             [f"{unitary(i, j).real:.3f}{unitary(i, j).imag:+.3f}j"
+            #                 for j in range(dim)])
+            #         print(f"  [{row}]")
 
             # Optional: Show statevector
-            if show_statevector:
-                try:
-                    # Apply circuit to |0⟩ state
-                    initial_state = Statevector.from_int(
-                        0, 2**circuit.num_qubits)
-                    final_state = initial_state.evolve(qc)
-                    print("\nFinal statevector (first 8 amplitudes):")
-                    for i in range(min(8, len(final_state))):
-                        amp = final_state[i]
-                        print(f"  |{i:0{circuit.num_qubits}b}⟩: {
-                              amp.real:.3f}{amp.imag:+.3f}j")
-                except Exception as e:
-                    print(f"  Could not compute statevector: {e}")
+            # if show_statevector:
+            #     try:
+            #         # Apply circuit to |0⟩ state
+            #         initial_state = Statevector.from_int(
+            #             0, 2**circuit.num_qubits)
+            #         final_state = initial_state.evolve(qc)
+            #         print("\nFinal statevector (first 8 amplitudes):")
+            #         for i in range(min(8, len(final_state))):
+            #             amp = final_state[i]
+            #             print(f"  |{i:0{circuit.num_qubits}b}⟩: {
+            #                   amp.real:.3f}{amp.imag:+.3f}j")
+            #     except Exception as e:
+            #         print(f"  Could not compute statevector: {e}")
 
         except Exception as e:
             print(f"Error visualizing circuit {title}: {e}")
@@ -219,9 +225,9 @@ class VisualQuantumOptimizer:
         start_time = time.time()
 
         # Visualize target circuit before optimization
-        if verbose and HAS_QISKIT:
-            self.visualize_circuit(self.target_circuit,
-                                   "TARGET CIRCUIT", show_unitary=True)
+        # if verbose and HAS_QISKIT:
+        #     self.visualize_circuit(self.target_circuit,
+        #                            "TARGET CIRCUIT", show_unitary=True)
 
         # Run optimization
         self.best_circuit = self.optimizer.run_evolution(
@@ -267,7 +273,7 @@ class VisualQuantumOptimizer:
             print("No optimization results available.")
             return
 
-        target_unitary = self.target_circuit.circuit_to_unitary()
+        target_unitary = self.target_unitary
         best_unitary = self.best_circuit.circuit_to_unitary()
         fidelity = calculate_fidelity(best_unitary, target_unitary)
 
@@ -276,14 +282,14 @@ class VisualQuantumOptimizer:
         print(f"{'='*60}")
 
         print("Target Circuit:")
-        print(f"  Depth: {self.target_circuit.depth}")
-        print(f"  Non-ID gates: {self.target_circuit.count_non_id_gates()}")
+        print(f"  Depth: {self.target_circuit.depth()}")
+        # print(f"  Non-ID gates: {self.target_circuit.count_non_id_gates()}")
 
         print("\nOptimized Circuit:")
         print(f"  Depth: {self.best_circuit.depth} ({
               self._get_depth_change():+.1f}%)")
-        print(f"  Non-ID gates: {self.best_circuit.count_non_id_gates()
-                                 } ({self._get_gate_change():+.1f}%)")
+        # print(f"  Non-ID gates: {self.best_circuit.count_non_id_gates()
+        #                          } ({self._get_gate_change():+.1f}%)")
         print(f"  Final fidelity: {fidelity:.6f}")
         print(f"  Final fitness: {self.best_circuit.fitness:.6f}")
 
@@ -298,14 +304,14 @@ class VisualQuantumOptimizer:
               self.optimization_stats.get('optimization_time', 0):.2f}s")
 
         # Show gate distribution comparison
-        self._compare_gate_distributions()
+        # self._compare_gate_distributions()
 
     def _get_depth_change(self) -> float:
         """Calculate depth change percentage"""
         if not self.best_circuit:
             return 0.0
-        change = ((self.best_circuit.depth - self.target_circuit.depth) /
-                  self.target_circuit.depth) * 100
+        change = ((self.best_circuit.depth - self.target_circuit.depth()) /
+                  self.target_circuit.depth()) * 100
         return change
 
     def _get_gate_change(self) -> float:
@@ -380,7 +386,8 @@ def demo_optimization():
 
             # Show both circuits side by side in a compact form
             print("\nTarget Circuit (Compact):")
-            target_qc = optimizer.circuit_to_qiskit(optimizer.target_circuit)
+            # target_qc = optimizer.circuit_to_qiskit(optimizer.target_circuit)
+            target_qc = optimizer.target_circuit
             print(target_qc.draw(output='text', fold=80))  # Compact output
 
             print("\nOptimized Circuit (Compact):")
