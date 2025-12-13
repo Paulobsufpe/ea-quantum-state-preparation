@@ -8,3 +8,6 @@ enabled = false
 
 [tool.setuptools]
 py-modules = ["qext"]
+
+[tool.flake8]
+ignore = ["E", "W"]
