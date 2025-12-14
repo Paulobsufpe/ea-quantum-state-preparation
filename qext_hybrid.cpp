@@ -1,8 +1,8 @@
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#include <pybind11/functional.h>
-
 #define EIGEN_USE_BLAS
+#include <pybind11/pybind11.h>
+#include <pybind11/functional.h>
+#include <pybind11/stl.h>
+
 #include <pybind11/eigen.h>
 #include <Eigen/Dense>
 namespace py = pybind11;

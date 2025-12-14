@@ -36,8 +36,7 @@ public:
         return random_int(0, 1) ? true : false;
     }
     
-    template<typename T>
-    static inline constexpr T random_choice(const std::vector<T>& items) {
+    static inline constexpr auto random_choice(const auto& items) {
         if (items.empty()) throw std::runtime_error("Cannot choose from empty list");
         return items[random_int(0, static_cast<int>(items.size()) - 1)];
     }

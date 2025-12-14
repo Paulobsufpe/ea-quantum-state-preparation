@@ -20,7 +20,7 @@ endif
 LDFLAGS:=-Wl,-z,now,-z,relro,-z,noexecstack,--gc-sections -fuse-ld=lld
 
 PYBIND_INC:=$$(python3 -m pybind11 --includes)
-# PYBIND_EXT:=$$(/usr/bin/env python3 -m pybind11 --extension-suffix)
+# PYBIND_EXT:=$$(python3 -m pybind11 --extension-suffix)
 
 default: qext.so
 omp: qext_omp.so

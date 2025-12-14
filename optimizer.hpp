@@ -14,7 +14,6 @@
 #define omp_get_thread_num() 0
 #endif // _OPENMP
 
-// Native fidelity calculation
 static inline constexpr double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
     if (U1.rows() != U2.rows() || U1.cols() != U2.cols()) {
         throw std::invalid_argument("Matrix dimensions must match");
@@ -27,18 +26,15 @@ static inline constexpr double calculate_fidelity(const MatrixXcd& U1, const Mat
     return fidelity;
 }
 
-// Crossover types
 enum class CrossoverType {
     SINGLE_POINT, UNIFORM, MULTI_POINT, BLOCKWISE
 };
 
-// Mutation types
 enum class MutationType {
     SINGLE_GATE, GATE_SWAP, COLUMN_SWAP, CTRL_TARGET_SWAP,
     ADD_RANDOM_COLUMN, DELETE_COLUMN, ADD_CX_GATE, ADD_SINGLE_GATE, MUTATE_PARAMETERS
 };
 
-// Enhanced QuantumEvolutionaryOptimizer with hybrid optimization
 class QuantumEvolutionaryOptimizer {
 private:
     const int num_qubits;
@@ -59,7 +55,7 @@ private:
     std::shared_ptr<CircuitIndividual> best_individual;
     std::vector<double> fitness_history;
     
-    MatrixXcd target_unitary;  // Store target unitary
+    MatrixXcd target_unitary;
     
     std::function<double(const CircuitIndividual&)> fitness_func;
     
@@ -96,7 +92,7 @@ public:
         fitness_func = std::move(func);
     }
     
-    // Hybrid parameter optimization using COBYLA
+    // Parameter optimization using COBYLA
     inline void optimize_parameters(CircuitIndividual& individual) const {
         const std::vector<double> current_params = individual.get_parameters();
         if (current_params.empty()) return;
@@ -141,33 +137,28 @@ public:
     inline std::pair<CircuitIndividual, CircuitIndividual> select_parents(const std::string& method) const {
         if (method == "roulette") {
             return roulette_selection();
-        } else { // Default to tournament
+        } else {
             return tournament_selection();
         }
     }
     
-    // Crossover operations
     CircuitIndividual crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2,
                                CrossoverType method = CrossoverType::UNIFORM);
     
-    // Mutation operations
     CircuitIndividual mutate(CircuitIndividual individual);
     
     inline void evaluate_population_fitness(std::vector<CircuitIndividual>& individuals) const {
         if (!fitness_func) return;
         
-        // Parallel evaluation with OpenMP - safe and reliable
         #pragma omp parallel for
         for (size_t i = 0; i < individuals.size(); ++i) {
             individuals[i].fitness = fitness_func(individuals[i]);
         }
     }
     
-    // Enhanced evolution with hybrid optimization
     inline CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "tournament") {
         initialize_population(target_depth, !from_scratch);
         
-        // Evaluate initial population
         evaluate_population_fitness(population);
         
         const int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
@@ -175,12 +166,10 @@ public:
         std::vector<CircuitIndividual> offspring(num_offspring);
         
         for (int generation = 0; generation < generations; ++generation) {
-            // Apply parameter optimization every N generations
             if (generation % param_optimization_frequency == 0 && generation > 0) {
                 apply_parameter_optimization();
             }
             
-            // Create offspring in parallel with OpenMP
             #pragma omp parallel for
             for (int i = 0; i < num_offspring; ++i) {
                 auto parents = select_parents(selection_method);
