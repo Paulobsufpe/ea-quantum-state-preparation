@@ -115,17 +115,15 @@ CircuitIndividual QuantumEvolutionaryOptimizer::mutate_single_gate(CircuitIndivi
         auto used = ind.get_used_qubits(layer_idx);
         auto available = ind.get_available_qubits(used);
         if (available.size() >= 1) {
-            std::vector<int> new_qubits = {old_gate.qubits[0], random_generator.random_choice(available)};
+            std::vector<int> new_qubits {old_gate.qubits[0], random_generator.random_choice(available)};
             ind.layers[layer_idx][gate_idx] = Gate(GateType::CX, new_qubits);
         }
     } else if (new_type == GateType::RZ) {
         double angle = random_generator.random_double(0.0, 2.0 * M_PI);
-        std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
-                                 std::vector<int>{old_gate.qubits[0]};
+        std::vector<int> qubits {old_gate.qubits[0]};
         ind.layers[layer_idx][gate_idx] = Gate(GateType::RZ, qubits, angle);
     } else {
-        std::vector<int> qubits = old_gate.qubits.empty() ? std::vector<int>{0} : 
-                                 std::vector<int>{old_gate.qubits[0]};
+        std::vector<int> qubits {old_gate.qubits[0]};
         ind.layers[layer_idx][gate_idx] = Gate(new_type, qubits);
     }
     
@@ -137,13 +135,13 @@ CircuitIndividual QuantumEvolutionaryOptimizer::mutate_gate_swap(CircuitIndividu
     
     std::vector<int> indices(ind.layers.size());
     std::iota(indices.begin(), indices.end(), 0);
-    auto layers_idx = random_generator.random_sample(indices, 2);
-    int layer1 = layers_idx[0], layer2 = layers_idx[1];
+    auto idxs = random_generator.random_sample(indices, 2);
+    int idx1 = idxs[0], idx2 = idxs[1];
     
-    if (!ind.layers[layer1].empty() && !ind.layers[layer2].empty()) {
-        int gate1 = random_generator.random_int(0, static_cast<int>(ind.layers[layer1].size()) - 1);
-        int gate2 = random_generator.random_int(0, static_cast<int>(ind.layers[layer2].size()) - 1);
-        std::swap(ind.layers[layer1][gate1], ind.layers[layer2][gate2]);
+    if (!ind.layers[idx1].empty() && !ind.layers[idx2].empty()) {
+        int gate1 = random_generator.random_int(0, static_cast<int>(ind.layers[idx1].size()) - 1);
+        int gate2 = random_generator.random_int(0, static_cast<int>(ind.layers[idx2].size()) - 1);
+        std::swap(ind.layers[idx1][gate1], ind.layers[idx2][gate2]);
     }
     
     return ind;

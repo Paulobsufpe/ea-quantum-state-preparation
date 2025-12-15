@@ -104,21 +104,19 @@ public:
     MatrixXcd circuit_to_unitary();
     
 private:
-    static inline constexpr MatrixXcd get_gate_matrix(const Gate& gate, int total_qubits) {
-        int dim = 1 << total_qubits;
-        
+    static inline constexpr MatrixXcd get_gate_matrix(const Gate& gate, int dim) {
         switch (gate.type) {
             case GateType::X:
-                return get_pauli_x_matrix(gate.qubits[0], total_qubits);
+                return get_pauli_x_matrix(gate.qubits[0], dim);
             case GateType::SX:
-                return get_sx_matrix(gate.qubits[0], total_qubits);
+                return get_sx_matrix(gate.qubits[0], dim);
             case GateType::RZ:
-                return get_rz_matrix(gate.angle, gate.qubits[0], total_qubits);
+                return get_rz_matrix(gate.angle, gate.qubits[0], dim);
             case GateType::H:
-                return get_hadamard_matrix(gate.qubits[0], total_qubits);
+                return get_hadamard_matrix(gate.qubits[0], dim);
             case GateType::CX:
                 if (gate.qubits.size() >= 2) {
-                    return get_cx_matrix(gate.qubits[0], gate.qubits[1], total_qubits);
+                    return get_cx_matrix(gate.qubits[0], gate.qubits[1], dim);
                 }
                 // Fallthrough
             default:
@@ -126,8 +124,7 @@ private:
         }
     }
     
-    static inline constexpr MatrixXcd get_pauli_x_matrix(int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
+    static inline constexpr MatrixXcd get_pauli_x_matrix(int target_qubit, int dim) {
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         
         for (int i = 0; i < dim; ++i) {
@@ -138,8 +135,7 @@ private:
         return result;
     }
     
-    static inline constexpr MatrixXcd get_sx_matrix(int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
+    static inline constexpr MatrixXcd get_sx_matrix(int target_qubit, int dim) {
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         Complex half_plus_half_i = Complex(0.5, 0.5);
         Complex half_minus_half_i = Complex(0.5, -0.5);
@@ -162,8 +158,7 @@ private:
         return result;
     }
     
-    static inline constexpr MatrixXcd get_rz_matrix(double angle, int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
+    static inline constexpr MatrixXcd get_rz_matrix(double angle, int target_qubit, int dim) {
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         Complex phase0 = std::exp(Complex(0, -angle/2));
         Complex phase1 = std::exp(Complex(0, angle/2));
@@ -179,8 +174,7 @@ private:
         return result;
     }
     
-    static inline constexpr MatrixXcd get_hadamard_matrix(int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
+    static inline constexpr MatrixXcd get_hadamard_matrix(int target_qubit, int dim) {
         MatrixXcd result = MatrixXcd::Zero(dim, dim);
         double inv_sqrt2 = 1.0 / std::sqrt(2.0);
         
@@ -200,8 +194,7 @@ private:
         return result;
     }
     
-    static inline constexpr MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int total_qubits) {
-        int dim = 1 << total_qubits;
+    static inline constexpr MatrixXcd get_cx_matrix(int control_qubit, int target_qubit, int dim) {
         MatrixXcd result = MatrixXcd::Identity(dim, dim);
         
         for (int i = 0; i < dim; ++i) {

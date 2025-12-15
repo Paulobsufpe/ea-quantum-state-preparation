@@ -179,10 +179,6 @@ public:
         std::vector<CircuitIndividual> offspring(num_offspring);
         
         for (int generation = 0; generation < generations; ++generation) {
-            if (generation % param_optimization_frequency == 0 && generation > 0) {
-                apply_parameter_optimization();
-            }
-            
             #pragma omp parallel for
             for (size_t i = 0; i < num_offspring; ++i) {
                 auto parents = select_parents(selection_method);
@@ -195,7 +191,11 @@ public:
                 }
                 offspring[i] = std::move(child);
             }
-            
+
+            if (generation % param_optimization_frequency == 0 && generation > 0) {
+                apply_parameter_optimization();
+            }
+
             // Replace worst individuals
             std::sort(population.begin(), population.end(),
                      [](const CircuitIndividual& a, const CircuitIndividual& b) {

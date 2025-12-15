@@ -36,7 +36,7 @@ MatrixXcd CircuitIndividual::circuit_to_unitary() {
         for (const auto& gate : layer) {
             if (gate.type == GateType::ID) continue;
             
-            gate_matrix = get_gate_matrix(gate, num_qubits);
+            gate_matrix = get_gate_matrix(gate, dim);
             layer_matrix = gate_matrix * layer_matrix;
         }
         
