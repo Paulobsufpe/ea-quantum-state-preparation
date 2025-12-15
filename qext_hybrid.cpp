@@ -22,21 +22,16 @@ namespace py = pybind11;
 
 // Fast fitness calculation
 static inline constexpr double calculate_fitness(CircuitIndividual& circuit, const MatrixXcd& target_unitary, 
-                        double alpha = 10.0, double beta = 1.0, int target_depth = 20) {
-    try {
-        MatrixXcd circuit_unitary = circuit.circuit_to_unitary();
-        double fid = calculate_fidelity(circuit_unitary, target_unitary);
-        
-        // Multi-objective fitness with depth penalty
-        double normalized_depth = (target_depth > 1) ? 
-            static_cast<double>(circuit.depth - 1) / (target_depth - 1) : 0.0;
-        
-        double fitness = alpha * fid - beta * normalized_depth;
-        return fitness;
-    } catch (const std::exception& e) {
-        std::cerr << "Error in fitness calculation: " << e.what() << std::endl;
-        return 0.0;
-    }
+                                                 double alpha = 10.0, double beta = 1.0, int target_depth = 20) {
+    MatrixXcd circuit_unitary = circuit.circuit_to_unitary();
+    double fid = calculate_fidelity(circuit_unitary, target_unitary);
+
+    // Multi-objective fitness with depth penalty
+    double normalized_depth = (target_depth > 1) ? 
+        static_cast<double>(circuit.depth - 1) / (target_depth - 1) : 0.0;
+
+    double fitness = alpha * fid - beta * normalized_depth;
+    return fitness;
 }
 
 // Pybind11 module
@@ -88,6 +83,7 @@ PYBIND11_MODULE(ModuleName, m) {
              py::arg("replace_rate"), py::arg("alpha"), py::arg("beta"), py::arg("target_depth"),
              py::arg("gate_set"), py::arg("param_freq") = 25, py::arg("param_rate") = 0.1)
         .def("set_fitness_function", &QuantumEvolutionaryOptimizer::set_fitness_function)
+        .def("set_target_circuit", &QuantumEvolutionaryOptimizer::set_target_circuit)
         .def("set_target_unitary", &QuantumEvolutionaryOptimizer::set_target_unitary)
         .def("optimize_parameters", &QuantumEvolutionaryOptimizer::optimize_parameters)
         .def("apply_parameter_optimization", &QuantumEvolutionaryOptimizer::apply_parameter_optimization)

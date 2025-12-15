@@ -55,6 +55,7 @@ private:
     std::shared_ptr<CircuitIndividual> best_individual;
     std::vector<double> fitness_history;
     
+    CircuitIndividual target_circuit;
     MatrixXcd target_unitary;
     
     std::function<double(const CircuitIndividual&)> fitness_func;
@@ -83,6 +84,10 @@ public:
           gate_set(std::move(g_set)) {
     }
     
+    inline void set_target_circuit(const CircuitIndividual& target) {
+        target_circuit = target;
+    }
+
     // Set target unitary for native fitness calculation
     inline void set_target_unitary(const MatrixXcd& target) {
         target_unitary = target;
@@ -123,9 +128,17 @@ public:
         population.clear();
         best_individual.reset();
         fitness_history.clear();
-        
-        for (int i = 0; i < population_size; ++i) {
-            population.push_back(create_random_circuit(initial_depth));
+
+        if (from_target) {
+            population.push_back(target_circuit);
+            population[0].unitary = target_unitary;
+            for (int i = 1; i < population_size; ++i) {
+                population.push_back(create_random_circuit(initial_depth));
+            }
+        } else {
+            for (int i = 0; i < population_size; ++i) {
+                population.push_back(create_random_circuit(initial_depth));
+            }
         }
     }
     
@@ -156,13 +169,13 @@ public:
         }
     }
     
-    inline CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "tournament") {
+    inline CircuitIndividual run_evolution(bool from_scratch = true, const std::string& selection_method = "roulette") {
         initialize_population(target_depth, !from_scratch);
         
         evaluate_population_fitness(population);
         
-        const int num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
-        const int num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
+        const size_t num_offspring = std::max(1, static_cast<int>(population_size * offspring_rate));
+        const size_t num_replace = std::max(1, static_cast<int>(population_size * replace_rate));
         std::vector<CircuitIndividual> offspring(num_offspring);
         
         for (int generation = 0; generation < generations; ++generation) {
@@ -171,7 +184,7 @@ public:
             }
             
             #pragma omp parallel for
-            for (int i = 0; i < num_offspring; ++i) {
+            for (size_t i = 0; i < num_offspring; ++i) {
                 auto parents = select_parents(selection_method);
                 auto child = crossover(parents.first, parents.second);
                 child = mutate(std::move(child));
@@ -193,8 +206,12 @@ public:
                          return a.fitness > b.fitness;
                      });
             
-            for (int i = 0; i < num_replace && i < static_cast<int>(offspring.size()); ++i) {
-                population[i] = std::move(offspring[i]);
+            for (size_t i = 0; i < offspring.size(); ++i) {
+                if (i < num_replace) {
+                    population[i] = std::move(offspring[i]);
+                } else {
+                    population[i] = population[i].optimize_structure();
+                }
             }
             
             // Track best individual

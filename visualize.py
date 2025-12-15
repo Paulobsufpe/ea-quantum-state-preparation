@@ -88,6 +88,7 @@ class VisualQuantumOptimizer:
             param_rate=param_rate
         )
 
+        self.optimizer.set_target_circuit(self.target_circuit)
         self.optimizer.set_target_unitary(self.target_unitary)
         self.optimizer.set_fitness_function(
             lambda circuit: calculate_fitness(

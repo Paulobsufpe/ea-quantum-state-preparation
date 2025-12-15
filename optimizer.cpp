@@ -247,11 +247,9 @@ void QuantumEvolutionaryOptimizer::apply_parameter_optimization() const {
     const int num_to_optimize = std::max(1, static_cast<int>(population_size * param_optimization_rate));
     auto candidates = random_generator.random_sample(population, num_to_optimize);
     
-    // Parallel parameter optimization with OpenMP
     #pragma omp parallel for
     for (size_t i = 0; i < candidates.size(); ++i) {
         optimize_parameters(candidates[i]);
-        // Update fitness after parameter optimization
         if (fitness_func) {
             candidates[i].fitness = fitness_func(candidates[i]);
         }
@@ -273,7 +271,8 @@ CircuitIndividual QuantumEvolutionaryOptimizer::create_random_circuit(int depth)
             
             GateType gate_type = random_generator.random_choice(gate_set);
             
-            if (gate_type == GateType::CX && available.size() >= 2) {
+            if (gate_type == GateType::CX) {
+                if (available.size() < 2) continue;
                 // Add CX gate
                 auto qubit_pair = random_generator.random_sample(available, 2);
                 layer.emplace_back(GateType::CX, qubit_pair);
