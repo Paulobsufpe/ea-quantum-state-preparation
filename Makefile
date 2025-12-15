@@ -2,6 +2,7 @@ CC :=clang
 CXX:=clang++
 
 ARGS:=
+EXTRAFLAGS:=
 
 PKG_CONFIG_INC:=$$(pkg-config --cflags python3 eigen3)
 PKG_CONFIG_LIB:=-lopenblas
@@ -9,7 +10,7 @@ CFLAGS:=-fPIC -Wall -Wextra -fno-plt -fstack-protector-strong \
 				-fno-math-errno -fno-trapping-math -fvisibility=hidden -gdwarf-5 \
 				-fno-omit-frame-pointer
 CXXFLAGS:=${CFLAGS} -std=c++23
-OPTFLAGS:=-O3 -march=native
+OPTFLAGS:=-O3 -march=native ${EXTRAFLAGS}
 
 ifeq ($(CXX),clang++)
     PCH_INC:=-include-pch pch.hpp.gch

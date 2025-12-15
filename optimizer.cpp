@@ -263,13 +263,11 @@ void QuantumEvolutionaryOptimizer::apply_parameter_optimization() const {
 CircuitIndividual QuantumEvolutionaryOptimizer::create_random_circuit(int depth) const {
     std::vector<std::vector<Gate>> layers;
     
-    for (int i = 0; i < depth; ++i) {
+    for (; depth > 0 ; --depth) {
         std::vector<Gate> layer;
         std::vector<bool> used(num_qubits, false);
         
-        // Try to add some gates to this layer
-        int attempts = 0;
-        while (attempts < num_qubits * 2) {
+        while (true) {
             auto available = CircuitIndividual::get_available_qubits(used);
             if (available.empty()) break;
             
@@ -281,7 +279,7 @@ CircuitIndividual QuantumEvolutionaryOptimizer::create_random_circuit(int depth)
                 layer.emplace_back(GateType::CX, qubit_pair);
                 used[qubit_pair[0]] = true;
                 used[qubit_pair[1]] = true;
-            } else if (gate_type != GateType::ID && !available.empty()) {
+            } else if (gate_type != GateType::ID) {
                 // Add single-qubit gate
                 int qubit = random_generator.random_choice(available);
                 if (gate_type == GateType::RZ) {
@@ -292,7 +290,6 @@ CircuitIndividual QuantumEvolutionaryOptimizer::create_random_circuit(int depth)
                 }
                 used[qubit] = true;
             }
-            attempts++;
         }
         layers.push_back(std::move(layer));
     }
@@ -381,8 +378,9 @@ std::pair<CircuitIndividual, CircuitIndividual> QuantumEvolutionaryOptimizer::ro
 }
 
 // Crossover operations
-CircuitIndividual QuantumEvolutionaryOptimizer::crossover(const CircuitIndividual& parent1, const CircuitIndividual& parent2,
-                           CrossoverType method) {
+CircuitIndividual QuantumEvolutionaryOptimizer::crossover(const CircuitIndividual& parent1,
+                                                          const CircuitIndividual& parent2,
+                                                          CrossoverType method) {
     if (random_generator.random_double() > crossover_rate || parent1.layers.empty() || parent2.layers.empty()) {
         return random_generator.random_bool() ? parent1 : parent2;
     }
