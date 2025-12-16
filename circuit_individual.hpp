@@ -31,7 +31,7 @@ public:
     inline constexpr std::vector<bool> get_used_qubits(int layer_idx) const {
         std::vector<bool> used(num_qubits, false);
         auto layer = layers[layer_idx];
-        rng::transform(layer, used.begin(),
+        std::transform(layer.begin(), layer.end(), used.begin(),
             [this](Gate gate) -> bool {
                 return rng::max(gate.qubits) < num_qubits; });
         return used;

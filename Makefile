@@ -35,7 +35,7 @@ run: visualize.py .venv qext.so qext_omp.so
 
 cl: clean
 clean:
-	rm *.so *.o *.tmp pch*
+	rm -rf *.so *.o *.tmp pch* run_outputs_*
 
 qext.so: qext.o cobyla.o gate.o circuit_individual.o optimizer.o pch.hpp.gch
 	${CXX} ${CXXFLAGS} ${OPTFLAGS} ${PKG_CONFIG_LIB} ${LDFLAGS} $^ -shared -o $@

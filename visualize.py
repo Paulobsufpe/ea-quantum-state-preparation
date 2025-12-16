@@ -192,8 +192,8 @@ class VisualQuantumOptimizer:
                     print("\nFinal statevector (first 8 amplitudes):")
                     for i in range(min(8, len(final_state))):
                         amp = final_state[i]
-                        print(f"  |{i:0{circuit.num_qubits}b}⟩: {
-                              amp.real:.3f}{amp.imag:+.3f}j")
+                        print(
+                            f"  |{i:0{circuit.num_qubits}b}⟩: {amp.real:.3f}{amp.imag:+.3f}j")
                 except Exception as e:
                     print(f"  Could not compute statevector: {e}")
 
@@ -205,8 +205,8 @@ class VisualQuantumOptimizer:
         if verbose:
             mode = "Hybrid" if self.use_hybrid else "Standard"
             print(f"=== {mode} Quantum Circuit Optimization ===")
-            print(f"Qubits: {self.num_qubits}, Target depth: {
-                  self.target_depth}")
+            print(
+                f"Qubits: {self.num_qubits}, Target depth: {self.target_depth}")
 
             # FIXED: Use direct attribute access instead of getter methods
             print(f"Population: {self.optimizer.population_size}")
@@ -248,8 +248,8 @@ class VisualQuantumOptimizer:
             }
 
         if verbose:
-            print(f"\nOptimization completed in {
-                  optimization_time:.2f} seconds")
+            print(
+                f"\nOptimization completed in {optimization_time:.2f} seconds")
 
             # Visualize best circuit
             if HAS_QISKIT and self.best_circuit:
@@ -281,22 +281,22 @@ class VisualQuantumOptimizer:
         print(f"  Non-ID gates: {self.target_circuit.count_non_id_gates()}")
 
         print("\nOptimized Circuit:")
-        print(f"  Depth: {self.best_circuit.depth} ({
-              self._get_depth_change():+.1f}%)")
-        print(f"  Non-ID gates: {self.best_circuit.count_non_id_gates()
-                                 } ({self._get_gate_change():+.1f}%)")
+        print(
+            f"  Depth: {self.best_circuit.depth} ({self._get_depth_change():+.1f}%)")
+        print(
+            f"  Non-ID gates: {self.best_circuit.count_non_id_gates()} ({self._get_gate_change():+.1f}%)")
         print(f"  Final fidelity: {fidelity:.6f}")
         print(f"  Final fitness: {self.best_circuit.fitness:.6f}")
 
         print("\nOptimization Process:")
-        print(f"  Generations: {self.optimization_stats.get(
-            'convergence_generation', 0)}")
-        print(f"  Best fitness: {
-              self.optimization_stats.get('best_fitness', 0):.6f}")
-        print(f"  Average fitness: {
-              self.optimization_stats.get('avg_fitness', 0):.6f}")
-        print(f"  Optimization time: {
-              self.optimization_stats.get('optimization_time', 0):.2f}s")
+        print(
+            f"  Generations: {self.optimization_stats.get('convergence_generation', 0)}")
+        print(
+            f"  Best fitness: {self.optimization_stats.get('best_fitness', 0):.6f}")
+        print(
+            f"  Average fitness: {self.optimization_stats.get('avg_fitness', 0):.6f}")
+        print(
+            f"  Optimization time: {self.optimization_stats.get('optimization_time', 0):.2f}s")
 
         # Show gate distribution comparison
         self._compare_gate_distributions()
@@ -335,8 +335,8 @@ class VisualQuantumOptimizer:
             best_count = best_counts.get(gate_type, 0)
             change = best_count - target_count
             change_str = f"{change:+.1f}" if change != 0 else " 0"
-            print(f"  {gate_type.name:10} | {target_count:8} | {
-                  best_count:10} | {change_str:>7}")
+            print(
+                f"  {gate_type.name:10} | {target_count:8} | {best_count:10} | {change_str:>7}")
 
 
 def create_comparison_optimizer():

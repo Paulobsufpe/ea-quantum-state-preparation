@@ -1,7 +1,7 @@
 [project]
 name = "ea-quantum-state-preparation"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 
 [tool.pylsp-mypy]
 enabled = false
@@ -10,4 +10,6 @@ enabled = false
 py-modules = ["qext"]
 
 [tool.flake8]
-ignore = ["E", "W"]
+ignore = ["E501", "W292"]
+max-line-length = 120
+exclude = [".venv", "__pycache__", "docs", "build"]

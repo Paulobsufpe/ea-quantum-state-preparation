@@ -2,8 +2,8 @@
 
 OUTPUT_DIR="run_outputs_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUTPUT_DIR"
-NUM_RUNS=100
-MAX_JOBS=4
+NUM_RUNS=800
+MAX_JOBS=42
 
 echo "Running $NUM_RUNS iterations with $MAX_JOBS parallel jobs..."
 
@@ -14,7 +14,7 @@ for ((i=1; i<=NUM_RUNS; i++)); do
     if (( (i % MAX_JOBS) == 0 )); then
         wait
     fi
-    printf "\rProgress: [%-50s] %d%%" "$(printf '#%.0s' {1..$(((i+1)*50/NUM_RUNS))})" $(((i+1)*100/NUM_RUNS))
+    printf "\rProgress: [%-50s] %d%%" "$(printf '#%.0s' {1..$((i*50/NUM_RUNS))})" $((i*100/NUM_RUNS))
 done
 wait
 echo "All runs completed!"

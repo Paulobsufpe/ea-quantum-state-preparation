@@ -1,0 +1,4 @@
+Resultados para 800 vezes:
+
+Depth médio:    6.14
+Fidelity média: 0.129196
