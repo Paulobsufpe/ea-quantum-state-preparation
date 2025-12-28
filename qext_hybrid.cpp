@@ -88,7 +88,11 @@ PYBIND11_MODULE(ModuleName, m) {
         .def("optimize_parameters", &QuantumEvolutionaryOptimizer::optimize_parameters)
         .def("apply_parameter_optimization", &QuantumEvolutionaryOptimizer::apply_parameter_optimization)
         .def("create_random_circuit", &QuantumEvolutionaryOptimizer::create_random_circuit)
+#ifdef _OPENMP
         .def("run_evolution", &QuantumEvolutionaryOptimizer::run_evolution, py::call_guard<py::gil_scoped_release>(),
+#else
+        .def("run_evolution", &QuantumEvolutionaryOptimizer::run_evolution,
+#endif // _OPENMP
              py::arg("from_scratch") = true, py::arg("selection_method") = "tournament")
         .def("get_population", &QuantumEvolutionaryOptimizer::get_population)
         .def("get_fitness_history", &QuantumEvolutionaryOptimizer::get_fitness_history)
