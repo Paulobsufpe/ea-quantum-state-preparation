@@ -1,6 +1,6 @@
 #pragma once
 #include <random>
-#include <stdexcept>
+#include <cassert>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -36,8 +36,8 @@ public:
         return random_int(0, 1) ? true : false;
     }
     
-    static inline constexpr auto& random_choice(const auto& items) {
-        if (items.empty()) throw std::runtime_error("Cannot choose from empty list");
+    static inline constexpr auto& random_choice(const auto& items) noexcept {
+        assert(!items.empty() && "Cannot choose from empty list");
         return items[random_int(0, static_cast<int>(items.size()) - 1)];
     }
     

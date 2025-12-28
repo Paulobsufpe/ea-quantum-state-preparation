@@ -14,10 +14,8 @@
 #define omp_get_thread_num() 0
 #endif // _OPENMP
 
-static inline constexpr double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) {
-    if (U1.rows() != U2.rows() || U1.cols() != U2.cols()) {
-        throw std::invalid_argument("Matrix dimensions must match");
-    }
+static inline constexpr double calculate_fidelity(const MatrixXcd& U1, const MatrixXcd& U2) noexcept {
+    assert(U1.rows() == U2.rows() && U1.cols() == U2.cols() && "Matrix dimensions must match");
     
     MatrixXcd product = U1.adjoint() * U2;
     Complex trace = product.trace();

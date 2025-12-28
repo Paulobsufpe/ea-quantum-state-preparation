@@ -8,7 +8,6 @@
 namespace py = pybind11;
 
 #include <vector>
-#include <iostream>
 #ifdef _OPENMP
 #define ModuleName qext_omp
 #else
