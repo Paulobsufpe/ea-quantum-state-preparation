@@ -8,7 +8,7 @@ PKG_CONFIG_INC:=$$(pkg-config --cflags python3 eigen3)
 PKG_CONFIG_LIB:=-lopenblas
 CFLAGS:=-fPIC -Wall -Wextra -fno-plt -fstack-protector-strong \
 				-fno-math-errno -fno-trapping-math -fvisibility=hidden -gdwarf-5 \
-				-fno-omit-frame-pointer
+				-fno-omit-frame-pointer -Wswitch-enum # -Wconversion
 CXXFLAGS:=${CFLAGS} -std=c++23
 OPTFLAGS:=-O3 -march=native ${EXTRAFLAGS}
 
@@ -27,7 +27,7 @@ default: qext.so
 omp: qext_omp.so
 all: default omp
 
-.PHONY: default omp run clean
+.PHONY: default omp run clean pch.hpp.tmp
 
 r: run
 run: visualize.py .venv qext.so qext_omp.so
@@ -71,7 +71,7 @@ pch.hpp.tmp: $(filter-out pch.hpp,$(wildcard *.cpp *.hpp))
 
 pch.hpp: pch.hpp.tmp
 	set -x; \
-	if [ ! -f  "$@" ] || [ -n "$(cmp $@ $<)" ]; then \
+	if [ ! -f  "$@" ] || [ -n "$$(cmp $@ $< 2>&1)" ]; then \
 		cat $< > $@; \
 	fi
 
